@@ -1,7 +1,12 @@
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Masonry from 'react-masonry-css';
+import useImageStore from '../../store/imageStore';
 
 const Home = () => {
+  const navigate = useNavigate();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const setImageData = useImageStore((state) => state.setImageData);
   const [cards] = useState([
     {
       id: 1,
@@ -17,17 +22,70 @@ const Home = () => {
       id: 3,
       image: 'https://picsum.photos/300/350',
       text: '示例文本 3'
+    },
+    {
+      id: 4,
+      image: 'https://picsum.photos/300/280',
+      text: '示例文本 4'
+    },
+    {
+      id: 5,
+      image: 'https://picsum.photos/300/320',
+      text: '示例文本 5'
+    },
+    {
+      id: 6,
+      image: 'https://picsum.photos/300/360',
+      text: '示例文本 6'
     }
   ]);
 
+  const handleImageUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    console.log('File input change event triggered');
+    const file = event.target.files?.[0];
+    
+    if (!file) {
+      console.log('No file selected');
+      return;
+    }
+
+    console.log('File selected:', file.name);
+    const reader = new FileReader();
+
+    reader.onerror = (error) => {
+      console.error('Error reading file:', error);
+    };
+
+    reader.onload = () => {
+      console.log('File read successfully');
+      try {
+        const base64String = reader.result as string;
+        console.log('Base64 string created');
+        setImageData(base64String);
+        console.log('Image data set in store');
+        navigate('/process', { replace: true });
+        console.log('Navigated to process page');
+      } catch (error) {
+        console.error('Error processing image:', error);
+      }
+    };
+
+    try {
+      console.log('Starting to read file');
+      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error('Error starting file read:', error);
+    }
+  }, [navigate, setImageData]);
+
   const breakpointColumnsObj = {
     default: 2,
-    700: 2,
-    500: 1
+    640: 2,
+    320: 1
   };
 
   return (
-    <div className="pt-14 pb-16">
+    <div>
       <header className="fixed top-0 left-0 right-0 bg-white border-b border-gray-200 z-10">
         <div className="flex justify-between items-center h-14 px-4">
           <h1 className="text-xl font-bold">RoLingo</h1>
@@ -49,31 +107,45 @@ const Home = () => {
         </div>
       </header>
 
-      <div className="px-4 py-4 bg-gray-100">
+      <div className="mt-14 px-2 py-2 bg-gray-100">
         <Masonry
           breakpointCols={breakpointColumnsObj}
-          className="flex -ml-4 w-auto"
-          columnClassName="pl-4 bg-clip-padding"
+          className="flex w-auto -ml-2"
+          columnClassName="pl-2 bg-clip-padding"
         >
           {cards.map((card) => (
             <div
               key={card.id}
-              className="bg-white rounded-lg overflow-hidden shadow-lg mb-4"
+              className="bg-white rounded-lg overflow-hidden shadow-sm mb-2"
             >
               <img
                 src={card.image}
                 alt="card"
                 className="w-full h-auto object-cover"
               />
-              <div className="p-4">
-                <p className="text-gray-800">{card.text}</p>
+              <div className="p-3">
+                <p className="text-gray-800 text-sm">{card.text}</p>
               </div>
             </div>
           ))}
         </Masonry>
       </div>
 
-      <button className="fixed right-4 bottom-20 bg-blue-500 text-white w-14 h-14 rounded-full flex items-center justify-center shadow-lg z-10">
+      <input
+        type="file"
+        ref={fileInputRef}
+        className="hidden"
+        accept="image/*"
+        onChange={handleImageUpload}
+      />
+
+      <button 
+        onClick={() => {
+          console.log('Upload button clicked');
+          fileInputRef.current?.click();
+        }}
+        className="fixed right-4 bottom-20 bg-blue-500 text-white w-14 h-14 rounded-full flex items-center justify-center shadow-lg z-10 hover:bg-blue-600 active:bg-blue-700 transition-colors"
+      >
         <svg
           className="w-8 h-8"
           fill="none"

@@ -17,10 +17,12 @@
     "react-dom": "^18.3.1",
     "react-masonry-css": "^1.0.16",
     "react-router-dom": "^7.1.1",
-    "tailwindcss": "^3.4.17"
+    "tailwindcss": "^3.4.17",
+    "zustand": "^5.0.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
+    "@tailwindcss/aspect-ratio": "^0.4.2",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
