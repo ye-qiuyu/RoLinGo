@@ -1,11 +1,15 @@
 import { useNavigate } from 'react-router-dom';
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 import useImageStore from '../../store/imageStore';
+import { analyzeImage, VisionAnalysisResult } from '../../services/visionService';
 
 const ImageProcess = () => {
   const navigate = useNavigate();
   const imageData = useImageStore((state) => state.imageData);
   const clearImageData = useImageStore((state) => state.clearImageData);
+  const [analysis, setAnalysis] = useState<VisionAnalysisResult | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     console.log('ImageProcess mounted');
@@ -14,7 +18,24 @@ const ImageProcess = () => {
     if (!imageData) {
       console.log('No image data, redirecting to home');
       navigate('/');
+      return;
     }
+
+    // 当图片数据存在时，自动开始分析
+    const analyzeCurrentImage = async () => {
+      try {
+        setIsAnalyzing(true);
+        setError(null);
+        const result = await analyzeImage(imageData);
+        setAnalysis(result);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '图片分析失败');
+      } finally {
+        setIsAnalyzing(false);
+      }
+    };
+
+    analyzeCurrentImage();
   }, [imageData, navigate]);
 
   const handleBack = useCallback(() => {
@@ -36,7 +57,6 @@ const ImageProcess = () => {
     return null;
   }
 
-  console.log('Rendering ImageProcess component');
   return (
     <div className="min-h-screen bg-white">
       {/* 顶部导航 */}
@@ -75,8 +95,42 @@ const ImageProcess = () => {
               alt="uploaded"
               className="w-full h-auto object-contain max-h-[70vh]"
             />
+            {isAnalyzing && (
+              <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                <div className="text-white">分析中...</div>
+              </div>
+            )}
           </div>
         </div>
+
+        {/* 分析结果显示 */}
+        {error && (
+          <div className="mt-4 p-4 bg-red-100 text-red-700 rounded-lg">
+            {error}
+          </div>
+        )}
+
+        {analysis && (
+          <div className="mt-4 space-y-4">
+            <div className="bg-gray-100 p-4 rounded-lg">
+              <h3 className="font-medium text-gray-700">场景类型</h3>
+              <p className="mt-1">{analysis.scene}</p>
+            </div>
+            <div className="bg-gray-100 p-4 rounded-lg">
+              <h3 className="font-medium text-gray-700">关键词</h3>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {analysis.keywords.map((keyword, index) => (
+                  <span
+                    key={index}
+                    className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
+                  >
+                    {keyword}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 角色选择区域 */}
         <div className="mt-6 flex justify-between items-center px-4">
@@ -98,7 +152,7 @@ const ImageProcess = () => {
         {/* 文本显示区域 */}
         <div className="mt-6 bg-orange-100 rounded-lg p-4">
           <p className="text-lg">
-            When you <span className="underline font-medium">bring your A-game</span> but your dog decides to <span className="underline font-medium">outshine you</span> with its nose!
+            {analysis?.description || '等待分析结果...'}
           </p>
         </div>
 
@@ -111,7 +165,14 @@ const ImageProcess = () => {
                 <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
               </svg>
             </button>
-            <button className="p-2 bg-gray-200 rounded-lg flex-1 mx-4">
+            <button 
+              className={`p-2 rounded-lg flex-1 mx-4 ${
+                isAnalyzing 
+                  ? 'bg-gray-200 text-gray-500' 
+                  : 'bg-blue-500 text-white hover:bg-blue-600 active:bg-blue-700'
+              }`}
+              disabled={isAnalyzing}
+            >
               Try it!
             </button>
             <div className="flex space-x-2">

@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Masonry from 'react-masonry-css';
 import useImageStore from '../../store/imageStore';
+import { optimizeImage, isImageValid } from '../../utils/imageOptimizer';
 
 const Home = () => {
   const navigate = useNavigate();
@@ -40,7 +41,7 @@ const Home = () => {
     }
   ]);
 
-  const handleImageUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     console.log('File input change event triggered');
     const file = event.target.files?.[0];
     
@@ -49,32 +50,27 @@ const Home = () => {
       return;
     }
 
-    console.log('File selected:', file.name);
-    const reader = new FileReader();
+    // 验证图片
+    if (!isImageValid(file)) {
+      alert('请选择有效的图片文件（JPG、PNG、GIF、WebP），大小不超过20MB');
+      return;
+    }
 
-    reader.onerror = (error) => {
-      console.error('Error reading file:', error);
-    };
-
-    reader.onload = () => {
-      console.log('File read successfully');
-      try {
-        const base64String = reader.result as string;
-        console.log('Base64 string created');
-        setImageData(base64String);
-        console.log('Image data set in store');
-        navigate('/process', { replace: true });
-        console.log('Navigated to process page');
-      } catch (error) {
-        console.error('Error processing image:', error);
-      }
-    };
-
+    console.log('File selected:', file.name, 'Size:', Math.round(file.size / 1024), 'KB');
+    
     try {
-      console.log('Starting to read file');
-      reader.readAsDataURL(file);
+      console.log('Starting image optimization');
+      const optimizedImage = await optimizeImage(file);
+      console.log('Image optimized');
+      
+      setImageData(optimizedImage);
+      console.log('Image data set in store');
+      
+      navigate('/process', { replace: true });
+      console.log('Navigated to process page');
     } catch (error) {
-      console.error('Error starting file read:', error);
+      console.error('Error processing image:', error);
+      alert('图片处理失败，请重试');
     }
   }, [navigate, setImageData]);
 
