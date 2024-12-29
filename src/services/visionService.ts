@@ -1,55 +1,48 @@
-import OpenAI from 'openai';
-
-const client = new OpenAI({
-  apiKey: import.meta.env.VITE_OPENAI_API_KEY,
-  baseURL: 'https://api.guidaodeng.com/v1',
-  dangerouslyAllowBrowser: true
-});
-
-export interface VisionAnalysisResult {
-  description: string;
-  keywords: string[];
-  scene: string;
-}
+import { VisionAnalysisResult } from '../types';
 
 export const analyzeImage = async (base64Image: string): Promise<VisionAnalysisResult> => {
   try {
-    const response = await client.chat.completions.create({
-      model: 'gpt-4-vision-preview',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: '请分析这张图片，并以JSON格式返回以下信息：\n1. description: 详细的场景描述\n2. keywords: 关键词列表（3-5个）\n3. scene: 场景类型',
-            },
-            {
-              type: 'image_url',
-              image_url: {
-                url: base64Image,
-              },
-            },
-          ],
-        },
-      ],
-      max_tokens: 500,
+    console.log('开始图片分析流程...');
+    
+    // 调用后端 API 进行图像分析
+    const response = await fetch('http://localhost:3000/api/vision', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ image: base64Image }),
     });
 
-    const content = response.choices[0]?.message?.content;
-    if (!content) {
-      throw new Error('No content in response');
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    // 解析返回的JSON字符串
-    const result = JSON.parse(content);
+    const result = await response.json();
+    
+    // 格式化百度 API 结果
+    console.log('\n=== 百度 API 识别结果 ===');
+    console.log('识别的关键词及置信度：');
+    result.baidu.result.forEach((item: any) => {
+      console.log(`- ${item.keyword} (置信度: ${item.score})`);
+    });
+    if (result.baidu.result[0]?.root) {
+      console.log('分类信息：', result.baidu.result[0].root);
+    }
+    
+    // 格式化 OpenAI 优化结果
+    console.log('\n=== OpenAI 优化结果 ===');
+    console.log('场景描述：', result.optimized.description);
+    console.log('关键词：', result.optimized.keywords.join(', '));
+    console.log('场景类型：', result.optimized.scene);
+    console.log('================\n');
+    
+    // 返回完整结果
     return {
-      description: result.description || '',
-      keywords: result.keywords || [],
-      scene: result.scene || '',
+      ...result.optimized,
+      detection: result.detection
     };
   } catch (error) {
-    console.error('Error analyzing image:', error);
+    console.error('图片分析过程出错：', error);
     throw error;
   }
 }; 

@@ -1,15 +1,30 @@
 import { useNavigate } from 'react-router-dom';
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, useRef } from 'react';
 import useImageStore from '../../store/imageStore';
 import { analyzeImage, VisionAnalysisResult } from '../../services/visionService';
+import { AutoImageAnnotation } from '../../components/AutoImageAnnotation';
+
+interface AnalysisResult extends VisionAnalysisResult {
+  detection?: {
+    location: {
+      left: number;
+      top: number;
+      width: number;
+      height: number;
+    };
+    keyword: string;
+    score: number;
+  }[];
+}
 
 const ImageProcess = () => {
   const navigate = useNavigate();
   const imageData = useImageStore((state) => state.imageData);
   const clearImageData = useImageStore((state) => state.clearImageData);
-  const [analysis, setAnalysis] = useState<VisionAnalysisResult | null>(null);
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const analysisRef = useRef<string | null>(null);
 
   useEffect(() => {
     console.log('ImageProcess mounted');
@@ -26,10 +41,14 @@ const ImageProcess = () => {
       try {
         setIsAnalyzing(true);
         setError(null);
+        console.log('开始分析图片...');
         const result = await analyzeImage(imageData);
+        console.log('分析完成:', result);
         setAnalysis(result);
       } catch (err) {
-        setError(err instanceof Error ? err.message : '图片分析失败');
+        console.error('图片分析失败:', err);
+        const errorMessage = err instanceof Error ? err.message : '图片分析失败';
+        setError(`图片处理出错: ${errorMessage}。请尝试使用其他图片或稍后重试。`);
       } finally {
         setIsAnalyzing(false);
       }
@@ -90,15 +109,23 @@ const ImageProcess = () => {
         {/* 图片显示区域 */}
         <div className="bg-gray-100 rounded-lg overflow-hidden mt-4">
           <div className="relative w-full">
-            <img
-              src={imageData}
-              alt="uploaded"
-              className="w-full h-auto object-contain max-h-[70vh]"
-            />
-            {isAnalyzing && (
-              <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-                <div className="text-white">分析中...</div>
+            {isAnalyzing ? (
+              <div className="relative">
+                <img
+                  src={imageData}
+                  alt="uploaded"
+                  className="w-full h-auto object-contain max-h-[70vh]"
+                />
+                <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                  <div className="text-white">分析中...</div>
+                </div>
               </div>
+            ) : (
+              <AutoImageAnnotation
+                imageUrl={imageData}
+                detections={analysis?.detection || []}
+                className="max-h-[70vh] object-contain"
+              />
             )}
           </div>
         </div>
