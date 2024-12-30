@@ -5,7 +5,15 @@ const axios = require('axios');
 const OpenAI = require('openai');
 
 const app = express();
-app.use(cors());
+
+// 配置 CORS
+app.use(cors({
+  origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -94,10 +102,23 @@ async function detectObjects(image) {
       await getBaiduAccessToken();
     }
 
-    console.log('开始调用百度通用物体识别 API...');
+    console.log('开始调用百度多主体检测 API...');
 
-    // 调用通用物体识别 API
-    const response = await axios.post(
+    // 调用多主体检测 API
+    const multiObjectResponse = await axios.post(
+      `https://aip.baidubce.com/rest/2.0/image-classify/v1/multi_object_detect?access_token=${BAIDU_API.accessToken}`,
+      `image=${encodeURIComponent(image)}`,
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      }
+    );
+
+    console.log('多主体检测原始结果:', JSON.stringify(multiObjectResponse.data, null, 2));
+
+    // 调用通用物体识别 API 获取详细的物体类别信息
+    const classifyResponse = await axios.post(
       `https://aip.baidubce.com/rest/2.0/image-classify/v2/advanced_general?access_token=${BAIDU_API.accessToken}`,
       `image=${encodeURIComponent(image)}`,
       {
@@ -107,39 +128,35 @@ async function detectObjects(image) {
       }
     );
 
-    console.log('物体识别原始结果:', JSON.stringify(response.data, null, 2));
+    console.log('物体识别原始结果:', JSON.stringify(classifyResponse.data, null, 2));
 
-    // 转换百度返回的结果为标准格式
-    const result = response.data;
-    if (result.result) {
-      // 为每个识别出的物体生成一个合理的位置
-      const gridSize = Math.ceil(Math.sqrt(result.result.length));
-      const cellWidth = 100 / gridSize;
-      const cellHeight = 100 / gridSize;
+    // 获取图片尺寸（从第一个检测结果中）
+    const detectedObjects = multiObjectResponse.data.result || [];
+    const firstObject = detectedObjects[0] || {};
+    const imageWidth = firstObject.location?.width + firstObject.location?.left || 1000;
+    const imageHeight = firstObject.location?.height + firstObject.location?.top || 1000;
 
-      result.result = result.result.map((item, index) => {
-        const row = Math.floor(index / gridSize);
-        const col = index % gridSize;
-        
-        // 在网格内生成位置
-        const location = {
-          left: col * cellWidth + (cellWidth * 0.1), // 添加一些边距
-          top: row * cellHeight + (cellHeight * 0.1),
-          width: cellWidth * 0.8,
-          height: cellHeight * 0.8
-        };
-
+    // 转换结果为标准格式
+    const result = {
+      result: detectedObjects.map(obj => {
+        const location = obj.location || {};
         return {
-          keyword: item.keyword,
-          score: item.score,
-          location: location
+          keyword: obj.name,
+          score: obj.score,
+          location: {
+            left: (location.left / imageWidth) * 100,
+            top: (location.top / imageHeight) * 100,
+            width: (location.width / imageWidth) * 100,
+            height: (location.height / imageHeight) * 100
+          }
         };
-      });
-    }
+      })
+    };
 
+    console.log('处理后的检测结果:', JSON.stringify(result, null, 2));
     return result;
   } catch (error) {
-    console.error('物体识别失败:', error);
+    console.error('物体检测失败:', error);
     console.error('错误详情:', error.response?.data || error.message);
     throw error;
   }
