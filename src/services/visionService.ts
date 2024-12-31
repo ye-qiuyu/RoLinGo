@@ -19,15 +19,12 @@ export const analyzeImage = async (base64Image: string): Promise<VisionAnalysisR
 
     const result = await response.json();
     
-    // 格式化百度 API 结果
-    console.log('\n=== 百度 API 识别结果 ===');
+    // 格式化 AWS Rekognition 结果
+    console.log('\n=== AWS Rekognition 识别结果 ===');
     console.log('识别的关键词及置信度：');
-    result.baidu.result.forEach((item: any) => {
+    result.aws.result.forEach((item: any) => {
       console.log(`- ${item.keyword} (置信度: ${item.score})`);
     });
-    if (result.baidu.result[0]?.root) {
-      console.log('分类信息：', result.baidu.result[0].root);
-    }
     
     // 格式化 OpenAI 优化结果
     console.log('\n=== OpenAI 优化结果 ===');

@@ -1,8 +1,17 @@
 require('dotenv').config();
+
+// 检查环境变量
+console.log('AWS 配置检查：', {
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID ? '已设置' : '未设置',
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ? '已设置' : '未设置',
+  region: 'us-east-2'
+});
+
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const OpenAI = require('openai');
+const { RekognitionClient, DetectLabelsCommand } = require('@aws-sdk/client-rekognition');
 
 const app = express();
 
@@ -17,12 +26,6 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-const BAIDU_API = {
-  apiKey: process.env.BAIDU_API_KEY,
-  secretKey: process.env.BAIDU_SECRET_KEY,
-  accessToken: '',
-};
-
 // OpenAI 客户端配置
 const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -30,19 +33,58 @@ const openaiClient = new OpenAI({
   dangerouslyAllowBrowser: true,
 });
 
-// 获取百度 access token
-async function getBaiduAccessToken() {
+// AWS Rekognition 客户端配置
+const rekognitionClient = new RekognitionClient({
+  region: 'us-east-2',
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || ''
+  }
+});
+
+// 添加验证函数
+async function validateAWSCredentials() {
+  if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
+    throw new Error('AWS 凭证未设置');
+  }
+  
+  console.log('开始验证 AWS 凭证...');
+  console.log('Access Key ID 长度:', process.env.AWS_ACCESS_KEY_ID.length);
+  console.log('Secret Access Key 长度:', process.env.AWS_SECRET_ACCESS_KEY.length);
+  
   try {
-    const response = await axios.post(
-      `https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id=${BAIDU_API.apiKey}&client_secret=${BAIDU_API.secretKey}`
-    );
-    BAIDU_API.accessToken = response.data.access_token;
-    return BAIDU_API.accessToken;
+    // 尝试一个简单的 AWS 操作来验证凭证
+    const params = {
+      Image: {
+        Bytes: Buffer.from('test')
+      },
+      MaxLabels: 1,
+      MinConfidence: 70
+    };
+    
+    console.log('发送测试请求到 AWS Rekognition...');
+    const command = new DetectLabelsCommand(params);
+    await rekognitionClient.send(command);
   } catch (error) {
-    console.error('获取百度 access token 失败:', error);
-    throw error;
+    console.error('AWS 错误详情:', {
+      name: error.name,
+      message: error.message,
+      code: error.code,
+      requestId: error.$metadata?.requestId
+    });
+    
+    if (error.name === 'UnrecognizedClientException') {
+      throw new Error('AWS 凭证无效，请检查 Access Key 和 Secret Key');
+    }
+    // 如果是其他错误（比如图片格式错误），说明凭证是有效的
+    console.log('AWS 凭证验证成功');
   }
 }
+
+// 在服务器启动时验证凭证
+validateAWSCredentials().catch(error => {
+  console.error('AWS 凭证验证失败:', error.message);
+});
 
 // 使用 OpenAI 优化结果
 async function optimizeWithOpenAI(keywords, scores) {
@@ -94,70 +136,61 @@ ${keywords.map((kw, i) => `${kw} (${scores[i]})`).join('\n')}
   }
 }
 
-// 调用百度物体检测 API
+// 调用 AWS Rekognition API 进行物体检测
 async function detectObjects(image) {
   try {
-    // 确保有 access token
-    if (!BAIDU_API.accessToken) {
-      await getBaiduAccessToken();
-    }
+    // 处理 base64 图片数据
+    const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
+    const imageBuffer = Buffer.from(base64Data, 'base64');
 
-    console.log('开始调用百度多主体检测 API...');
+    console.log('图片处理信息：', {
+      原始长度: image.length,
+      处理后长度: imageBuffer.length,
+      是否为Buffer: Buffer.isBuffer(imageBuffer)
+    });
 
-    // 调用多主体检测 API
-    const multiObjectResponse = await axios.post(
-      `https://aip.baidubce.com/rest/2.0/image-classify/v1/multi_object_detect?access_token=${BAIDU_API.accessToken}`,
-      `image=${encodeURIComponent(image)}`,
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      }
-    );
+    // 准备 AWS Rekognition 请求参数
+    const params = {
+      Image: {
+        Bytes: imageBuffer
+      },
+      MaxLabels: 50,
+      MinConfidence: 70
+    };
 
-    console.log('多主体检测原始结果:', JSON.stringify(multiObjectResponse.data, null, 2));
+    // 调用 AWS Rekognition
+    const command = new DetectLabelsCommand(params);
+    const response = await rekognitionClient.send(command);
 
-    // 调用通用物体识别 API 获取详细的物体类别信息
-    const classifyResponse = await axios.post(
-      `https://aip.baidubce.com/rest/2.0/image-classify/v2/advanced_general?access_token=${BAIDU_API.accessToken}`,
-      `image=${encodeURIComponent(image)}`,
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      }
-    );
-
-    console.log('物体识别原始结果:', JSON.stringify(classifyResponse.data, null, 2));
-
-    // 获取图片尺寸（从第一个检测结果中）
-    const detectedObjects = multiObjectResponse.data.result || [];
-    const firstObject = detectedObjects[0] || {};
-    const imageWidth = firstObject.location?.width + firstObject.location?.left || 1000;
-    const imageHeight = firstObject.location?.height + firstObject.location?.top || 1000;
+    console.log('AWS Rekognition 原始结果:', JSON.stringify(response, null, 2));
 
     // 转换结果为标准格式
     const result = {
-      result: detectedObjects.map(obj => {
-        const location = obj.location || {};
+      result: response.Labels.map(label => {
+        // 如果有边界框，使用第一个边界框的位置
+        const instance = label.Instances && label.Instances[0];
+        const location = instance ? instance.BoundingBox : null;
+        
         return {
-          keyword: obj.name,
-          score: obj.score,
-          location: {
-            left: (location.left / imageWidth) * 100,
-            top: (location.top / imageHeight) * 100,
-            width: (location.width / imageWidth) * 100,
-            height: (location.height / imageHeight) * 100
-          }
+          keyword: label.Name,
+          score: label.Confidence / 100, // 转换为 0-1 范围
+          location: location ? {
+            left: location.Left * 100,   // 转换为百分比
+            top: location.Top * 100,
+            width: location.Width * 100,
+            height: location.Height * 100
+          } : null
         };
-      })
+      }).filter(item => item.location !== null) // 只保留有位置信息的结果
     };
 
     console.log('处理后的检测结果:', JSON.stringify(result, null, 2));
     return result;
   } catch (error) {
-    console.error('物体检测失败:', error);
-    console.error('错误详情:', error.response?.data || error.message);
+    console.error('AWS Rekognition 检测失败:', error);
+    if (error.name === 'InvalidImageFormatException') {
+      console.error('图片格式无效，请确保是有效的图片文件');
+    }
     throw error;
   }
 }
@@ -166,10 +199,15 @@ async function detectObjects(image) {
 app.post('/api/vision', async (req, res) => {
   try {
     const { image } = req.body;
+    if (!image) {
+      console.error('请求中没有图片数据');
+      return res.status(400).json({ error: '请求中没有图片数据' });
+    }
 
     console.log('开始处理图像识别请求...');
+    console.log('图片数据长度:', image.length);
 
-    // 调用百度 API 进行识别
+    // 调用 AWS Rekognition 进行识别
     const detectionResult = await detectObjects(image);
     
     // 提取关键词和置信度
@@ -184,7 +222,7 @@ app.post('/api/vision', async (req, res) => {
 
     // 返回完整结果
     const result = {
-      baidu: detectionResult,
+      aws: detectionResult,
       detection: detectionResult.result || [],
       optimized: optimizedResult
     };
@@ -193,6 +231,10 @@ app.post('/api/vision', async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error('图像处理失败:', error);
+    console.error('错误堆栈:', error.stack);
+    if (error.response) {
+      console.error('AWS 响应错误:', error.response.data);
+    }
     res.status(500).json({ 
       error: error.message,
       details: error.response?.data || error.stack
