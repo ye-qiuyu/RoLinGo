@@ -87,15 +87,16 @@ validateAWSCredentials().catch(error => {
 });
 
 // 使用 OpenAI 优化结果
-async function optimizeWithOpenAI(keywords, scores) {
+async function optimizeWithOpenAI(keywords, scores, base64Image) {
   try {
-    const prompt = `
-作为一个专业的图像描述专家，请基于以下图像识别结果，生成一个详细、生动且自然的场景描述：
+    const prompt = `请作为一个专业的图像描述专家，分析这张图片。
 
-识别到的关键词及其置信度：
+${keywords.length > 0 ? `
+AWS识别到的关键词及其置信度：
 ${keywords.map((kw, i) => `${kw} (${scores[i]})`).join('\n')}
+` : ''}
 
-请以 JSON 格式返回以下信息：
+请仔细观察图片内容，结合您的观察${keywords.length > 0 ? '和上述关键词' : ''}，以 JSON 格式返回以下信息：
 1. description: 请提供一段流畅的场景描述，需要：
    - 从最显著的视觉元素开始描述
    - 包含环境、氛围、动作或状态
@@ -108,28 +109,91 @@ ${keywords.map((kw, i) => `${kw} (${scores[i]})`).join('\n')}
    - 氛围或情感特征
 3. scene: 一个简洁而准确的场景类型分类
 
-请确保描述自然流畅，避免机械化的罗列，让描述更有画面感和生命力。`;
+请确保描述自然流畅，避免机械化的罗列，让描述更有画面感和生命力。
+注意：返回内容必须是合法的 JSON 格式，以花括号 { 开始，以花括号 } 结束。`;
 
+    async function tryParseResponse(content) {
+      try {
+        // 尝试提取 JSON 部分
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          return JSON.parse(jsonMatch[0]);
+        }
+        return null;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    async function retryWithFormat(originalContent) {
+      const formatPrompt = `
+请将以下内容转换为合法的 JSON 格式，保持原有的创造性描述不变：
+
+${originalContent}
+
+请严格按照以下格式返回：
+{
+  "description": "场景描述",
+  "keywords": ["关键词1", "关键词2", "关键词3"],
+  "scene": "场景类型"
+}`;
+
+      const formatResponse = await openaiClient.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          {
+            role: 'user',
+            content: formatPrompt,
+          },
+        ],
+        max_tokens: 500,
+        temperature: 0.5,
+      });
+
+      return formatResponse.choices[0]?.message?.content;
+    }
+
+    // 第一次尝试，直接使用图片
     const response = await openaiClient.chat.completions.create({
       model: 'gpt-4o',
       messages: [
         {
           role: 'user',
-          content: prompt,
+          content: [
+            { type: 'text', text: prompt },
+            {
+              type: 'image_url',
+              image_url: {
+                url: base64Image
+              }
+            }
+          ],
         },
       ],
-      max_tokens: 500,
-      temperature: 0.7, // 添加一些创造性，但保持合理范围
+      max_tokens: 1000,
+      temperature: 0.7,
     });
 
-    const content = response.choices[0]?.message?.content;
+    let content = response.choices[0]?.message?.content;
     if (!content) {
       throw new Error('No content in response');
     }
 
-    // 清理 Markdown 格式，只保留 JSON 内容
-    const jsonContent = content.replace(/```json\n|\n```/g, '');
-    return JSON.parse(jsonContent);
+    // 尝试解析返回内容
+    let result = await tryParseResponse(content);
+    
+    // 如果解析失败，尝试修复格式
+    if (!result) {
+      console.log('首次返回格式不正确，尝试修复...');
+      const formattedContent = await retryWithFormat(content);
+      result = await tryParseResponse(formattedContent);
+      
+      if (!result) {
+        throw new Error('Failed to parse response after retry');
+      }
+    }
+
+    return result;
   } catch (error) {
     console.error('OpenAI 处理失败:', error);
     throw error;
@@ -217,8 +281,8 @@ app.post('/api/vision', async (req, res) => {
     console.log('识别到的关键词:', keywords);
     console.log('对应的置信度:', scores);
 
-    // 使用 OpenAI 优化结果
-    const optimizedResult = await optimizeWithOpenAI(keywords, scores);
+    // 使用 OpenAI 优化结果，传入原始图片数据
+    const optimizedResult = await optimizeWithOpenAI(keywords, scores, image);
 
     // 返回完整结果
     const result = {
@@ -233,7 +297,7 @@ app.post('/api/vision', async (req, res) => {
     console.error('图像处理失败:', error);
     console.error('错误堆栈:', error.stack);
     if (error.response) {
-      console.error('AWS 响应错误:', error.response.data);
+      console.error('错误响应:', error.response.data);
     }
     res.status(500).json({ 
       error: error.message,
