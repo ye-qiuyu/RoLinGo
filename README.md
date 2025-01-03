@@ -1,50 +1,48 @@
-# React + TypeScript + Vite
+# RoLinGo - README
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## 项目简介
 
-Currently, two official plugins are available:
+RoLinGo 是一款基于 AI 技术的英语口语练习应用，通过图片识别场景，生成符合不同情境的地道表达，同时提供多种风格化角色选择，帮助用户自信开口，提升真实场景下的英语表达能力。项目采用移动端优先的Web开发策略，专注于提供最佳的移动端用户体验。
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+[... 保留原有内容 ...]
 
-## Expanding the ESLint configuration
+### AI 服务实现细节
 
-If you are developing a production application, we recommend updating the configuration to enable type aware lint rules:
+#### 1. AWS Rekognition（物体检测）
+- **功能**：精确识别图片中的物体和位置
+- **实现流程**：
+  - 图片预处理：转换为 base64 格式
+  - 设置识别参数：最多50个标签，最低置信度70%
+  - 返回结果：包含关键词、置信度和位置信息
+  - 结果格式化：转换为百分比位置信息
 
-- Configure the top-level `parserOptions` property like this:
+#### 2. 关键词过滤系统
+- **功能**：去除重复和相似的关键词
+- **实现方式**：
+  - 预定义相似关键词组（如人物、武器、建筑等）
+  - 在每组中只保留置信度最高的关键词
+  - 应用于 AWS 结果和检测结果
 
-```js
-export default tseslint.config({
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
-```
+#### 3. OpenAI 增强（GPT-4）
+- **功能**：深度理解图片内容，生成自然语言描述
+- **实现流程**：
+  - 输入：图片 + AWS 关键词（如有）
+  - 处理：直接分析图片内容
+  - 输出：
+    * 详细的场景描述
+    * 3-5个重要关键词
+    * 场景类型分类
+  - 格式处理：确保输出符合 JSON 格式
 
-- Replace `tseslint.configs.recommended` to `tseslint.configs.recommendedTypeChecked` or `tseslint.configs.strictTypeChecked`
-- Optionally add `...tseslint.configs.stylisticTypeChecked`
-- Install [eslint-plugin-react](https://github.com/jsx-eslint/eslint-plugin-react) and update the config:
+#### 4. 系统集成
+- **数据流**：
+  1. 图片上传 → AWS 识别
+  2. 关键词过滤处理
+  3. OpenAI 增强分析
+  4. 结果整合展示
+- **错误处理**：
+  - AWS 识别失败时仍可使用 OpenAI 分析
+  - 格式错误自动修复机制
+  - 完整的错误日志记录
 
-```js
-// eslint.config.js
-import react from 'eslint-plugin-react'
-
-export default tseslint.config({
-  // Set the react version
-  settings: { react: { version: '18.3' } },
-  plugins: {
-    // Add the react plugin
-    react,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended rules
-    ...react.configs.recommended.rules,
-    ...react.configs['jsx-runtime'].rules,
-  },
-})
-```
+[... 保留其他原有内容 ...]
