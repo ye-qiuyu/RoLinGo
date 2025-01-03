@@ -1,8 +1,24 @@
 import { useNavigate } from 'react-router-dom';
 import { useEffect, useCallback, useState, useRef } from 'react';
 import useImageStore from '../../store/imageStore';
-import { analyzeImage, VisionAnalysisResult } from '../../services/visionService';
+import { analyzeImage } from '../../services/visionService';
 import { AutoImageAnnotation } from '../../components/AutoImageAnnotation';
+
+interface VisionAnalysisResult {
+  description: string;
+  keywords: string[];
+  scene: string;
+  detection?: {
+    location: {
+      left: number;
+      top: number;
+      width: number;
+      height: number;
+    };
+    keyword: string;
+    score: number;
+  }[];
+}
 
 interface AnalysisResult extends VisionAnalysisResult {
   detection?: {
@@ -24,9 +40,22 @@ const ImageProcess = () => {
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const analysisRef = useRef<string | null>(null);
+  const isProcessingRef = useRef(false);
+  const imageDataRef = useRef(imageData);
+  const mountedRef = useRef(false);
+
+  // 使用 useEffect 追踪 imageData 的变化
+  useEffect(() => {
+    imageDataRef.current = imageData;
+  }, [imageData]);
 
   useEffect(() => {
+    // 如果已经挂载过，直接返回
+    if (mountedRef.current) {
+      return;
+    }
+    mountedRef.current = true;
+
     console.log('ImageProcess mounted');
     console.log('Image data present:', !!imageData);
     
@@ -38,24 +67,42 @@ const ImageProcess = () => {
 
     // 当图片数据存在时，自动开始分析
     const analyzeCurrentImage = async () => {
+      // 如果正在处理中，直接返回
+      if (isProcessingRef.current) {
+        console.log('已有分析任务在进行中，跳过此次分析');
+        return;
+      }
+
       try {
+        isProcessingRef.current = true;
         setIsAnalyzing(true);
         setError(null);
         console.log('开始分析图片...');
         const result = await analyzeImage(imageData);
-        console.log('分析完成:', result);
-        setAnalysis(result);
+        // 确保分析的是当前图片
+        if (imageData === imageDataRef.current) {
+          console.log('分析完成:', result);
+          setAnalysis(result);
+        } else {
+          console.log('图片已更改，丢弃旧的分析结果');
+        }
       } catch (err) {
         console.error('图片分析失败:', err);
         const errorMessage = err instanceof Error ? err.message : '图片分析失败';
         setError(`图片处理出错: ${errorMessage}。请尝试使用其他图片或稍后重试。`);
       } finally {
         setIsAnalyzing(false);
+        isProcessingRef.current = false;
       }
     };
 
     analyzeCurrentImage();
-  }, [imageData, navigate]);
+
+    // 清理函数
+    return () => {
+      isProcessingRef.current = false;
+    };
+  }, [imageData, navigate]); // 只在组件挂载和 imageData 变化时执行
 
   const handleBack = useCallback(() => {
     console.log('Back button clicked');
@@ -146,7 +193,7 @@ const ImageProcess = () => {
             <div className="bg-gray-100 p-4 rounded-lg">
               <h3 className="font-medium text-gray-700">关键词</h3>
               <div className="mt-2 flex flex-wrap gap-2">
-                {analysis.keywords.map((keyword, index) => (
+                {analysis.keywords.map((keyword: string, index: number) => (
                   <span
                     key={index}
                     className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
