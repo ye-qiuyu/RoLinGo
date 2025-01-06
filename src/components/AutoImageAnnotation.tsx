@@ -11,15 +11,21 @@ interface Detection {
   score: number;
 }
 
+interface OpenAIKeyword {
+  text: string;
+}
+
 interface Props {
   imageUrl: string;
   detections: Detection[];
+  openaiKeywords?: string[];
   className?: string;
 }
 
 export const AutoImageAnnotation: React.FC<Props> = ({ 
   imageUrl, 
   detections,
+  openaiKeywords,
   className = ''
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -86,6 +92,7 @@ export const AutoImageAnnotation: React.FC<Props> = ({
     testDiv.style.fontWeight = 'bold';
     document.body.appendChild(testDiv);
 
+    // 测量 AWS 检测标签
     detections.forEach((detection, index) => {
       testDiv.textContent = detection.keyword;
       const rect = testDiv.getBoundingClientRect();
@@ -95,9 +102,22 @@ export const AutoImageAnnotation: React.FC<Props> = ({
       console.log(`Label size for "${detection.keyword}":`, { widthPercent, heightPercent });
     });
 
+    // 测量 OpenAI 关键词标签
+    if (openaiKeywords) {
+      const startIndex = detections.length;
+      openaiKeywords.forEach((keyword, index) => {
+        testDiv.textContent = keyword;
+        const rect = testDiv.getBoundingClientRect();
+        const widthPercent = (rect.width / imageDimensions.width) * 100;
+        const heightPercent = (rect.height / imageDimensions.height) * 100;
+        newLabelSizes.set(startIndex + index, { width: widthPercent, height: heightPercent });
+        console.log(`OpenAI label size for "${keyword}":`, { widthPercent, heightPercent });
+      });
+    }
+
     document.body.removeChild(testDiv);
     setLabelSizes(newLabelSizes);
-  }, [detections, imageDimensions]);
+  }, [detections, openaiKeywords, imageDimensions]);
 
   // 计算标签位置
   const calculateLabelPositions = (detections: Detection[]) => {
@@ -219,7 +239,79 @@ export const AutoImageAnnotation: React.FC<Props> = ({
     return positions;
   };
 
-  const labelPositions = useMemo(() => calculateLabelPositions(detections), [detections, imageDimensions, labelSizes]);
+  // 为 OpenAI 关键词生成随机位置
+  const generateRandomPosition = (labelWidth: number, labelHeight: number): { left: number; top: number } | null => {
+    if (!imageDimensions) return null;
+    
+    const minMarginPixels = 10; // 与图片边缘的最小像素距离
+    const marginX = (minMarginPixels / imageDimensions.width) * 100;
+    const marginY = (minMarginPixels / imageDimensions.height) * 100;
+    const safetyMargin = 1;
+    
+    const maxLeft = 100 - labelWidth - marginX - safetyMargin;
+    const maxTop = 100 - labelHeight - marginY - safetyMargin;
+    
+    const left = Math.random() * (maxLeft - marginX - safetyMargin) + marginX + safetyMargin;
+    const top = Math.random() * (maxTop - marginY - safetyMargin) + marginY + safetyMargin;
+    
+    return { left, top };
+  };
+
+  // 计算所有标签位置（包括 AWS 和 OpenAI）
+  const calculateAllLabelPositions = () => {
+    if (!imageDimensions || labelSizes.size === 0) {
+      console.log('Cannot calculate positions:', { imageDimensions, labelSizesCount: labelSizes.size });
+      return new Map();
+    }
+
+    // 先计算 AWS 标签位置
+    const positions = calculateLabelPositions(detections);
+
+    // 计算 OpenAI 关键词位置
+    if (openaiKeywords && openaiKeywords.length > 0) {
+      const startIndex = detections.length;
+      openaiKeywords.forEach((keyword, index) => {
+        const labelSize = labelSizes.get(startIndex + index);
+        if (labelSize) {
+          let position: { left: number; top: number } | null = null;
+          let attempts = 0;
+          const maxAttempts = 10;
+
+          // 尝试找到一个不重叠的位置
+          while (attempts < maxAttempts) {
+            position = generateRandomPosition(labelSize.width, labelSize.height);
+            if (position) {
+              // 检查是否与其他标签重叠
+              let hasOverlap = false;
+              positions.forEach((existingPos, existingIndex) => {
+                const existingSize = labelSizes.get(existingIndex);
+                if (existingSize) {
+                  const overlap = calculateOverlapPercentage(
+                    { ...position!, ...labelSize },
+                    { ...existingPos, ...existingSize }
+                  );
+                  if (overlap > 20) {
+                    hasOverlap = true;
+                  }
+                }
+              });
+
+              if (!hasOverlap) break;
+            }
+            attempts++;
+          }
+
+          if (position) {
+            positions.set(startIndex + index, position);
+          }
+        }
+      });
+    }
+
+    return positions;
+  };
+
+  const labelPositions = useMemo(() => calculateAllLabelPositions(), [detections, openaiKeywords, imageDimensions, labelSizes]);
 
   // 添加调试信息
   console.log('Render state:', {
@@ -248,22 +340,21 @@ export const AutoImageAnnotation: React.FC<Props> = ({
           className="absolute" 
           style={{
             left: 0,
-            top: imageDimensions.top,
-            width: imageDimensions.width,
-            height: imageDimensions.height,
-            pointerEvents: 'none'
+            top: 0,
+            width: '100%',
+            height: '100%'
           }}
         >
+          {/* 渲染 AWS 检测标签 */}
           {detections.map((detection, index) => {
             const position = labelPositions.get(index);
             if (!position) {
               console.log(`No position for detection ${index}`);
               return null;
             }
-
             return (
               <div
-                key={index}
+                key={`aws-${index}`}
                 className="absolute"
                 style={{
                   left: `${position.left}%`,
@@ -284,6 +375,41 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                   }}
                 >
                   {detection.keyword}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* 渲染 OpenAI 关键词标签 */}
+          {openaiKeywords?.map((keyword, index) => {
+            const position = labelPositions.get(detections.length + index);
+            if (!position) {
+              console.log(`No position for OpenAI keyword ${index}`);
+              return null;
+            }
+            return (
+              <div
+                key={`openai-${index}`}
+                className="absolute"
+                style={{
+                  left: `${position.left}%`,
+                  top: `${position.top}%`,
+                  zIndex: 10
+                }}
+              >
+                <div 
+                  className="inline-block font-bold text-black px-3 py-1 rounded-md whitespace-nowrap"
+                  style={{ 
+                    backgroundColor: 'rgba(34, 197, 94, 0.7)', // 绿色半透明
+                    backdropFilter: 'blur(2px)',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                    transform: 'translateY(-50%)',
+                    fontSize: '1.1rem',
+                    lineHeight: '1.4',
+                    zIndex: 20 
+                  }}
+                >
+                  {keyword}
                 </div>
               </div>
             );

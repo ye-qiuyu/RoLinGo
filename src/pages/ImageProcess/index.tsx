@@ -171,6 +171,7 @@ const ImageProcess = () => {
               <AutoImageAnnotation
                 imageUrl={imageData}
                 detections={analysis?.detection || []}
+                openaiKeywords={analysis?.keywords || []}
                 className="max-h-[70vh] object-contain"
               />
             )}
