@@ -13,5 +13,10 @@ export interface VisionAnalysisResult {
   description: string;
   keywords: string[];
   scene: string;
-  detection?: Detection[];
+  detection: any[];
+  openaiFiltered?: {
+    description: string;
+    keywords: string[];
+    scene: string;
+  };
 } 

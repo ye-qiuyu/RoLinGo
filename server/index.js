@@ -89,28 +89,28 @@ validateAWSCredentials().catch(error => {
 // 使用 OpenAI 优化结果
 async function optimizeWithOpenAI(keywords, scores, base64Image) {
   try {
-    const prompt = `请作为一个专业的图像描述专家，分析这张图片。
+    const prompt = `As a professional image description expert, please analyze this image.
 
 ${keywords.length > 0 ? `
-AWS识别到的关键词及其置信度：
+Keywords and confidence scores detected by AWS:
 ${keywords.map((kw, i) => `${kw} (${scores[i]})`).join('\n')}
 ` : ''}
 
-请仔细观察图片内容，结合您的观察${keywords.length > 0 ? '和上述关键词' : ''}，以 JSON 格式返回以下信息：
-1. description: 请提供一段流畅的场景描述，需要：
-   - 从最显著的视觉元素开始描述
-   - 包含环境、氛围、动作或状态
-   - 使用具体而生动的形容词
-   - 避免重复用语和不确定的表述
-2. keywords: 3-5个最重要的关键词，按重要性排序，可以包括：
-   - 主要物体/人物
-   - 场景特征
-   - 显著的视觉元素
-   - 氛围或情感特征
-3. scene: 一个简洁而准确的场景类型分类
+Please carefully observe the image content and combine your observations${keywords.length > 0 ? ' with the keywords above' : ''} to return the following information in JSON format:
+1. description: Provide a fluent scene description that:
+   - Starts with the most prominent visual elements
+   - Includes environment, atmosphere, actions, or states
+   - Uses specific and vivid adjectives
+   - Avoids repetitive language and uncertain expressions
+2. keywords: 3-5 most important keywords, ordered by importance, including:
+   - Main objects/subjects
+   - Scene characteristics
+   - Prominent visual elements
+   - Atmosphere or emotional features
+3. scene: A concise and accurate scene type classification
 
-请确保描述自然流畅，避免机械化的罗列，让描述更有画面感和生命力。
-注意：返回内容必须是合法的 JSON 格式，以花括号 { 开始，以花括号 } 结束。`;
+Please ensure the description flows naturally, avoiding mechanical listing, and make it more vivid and lively.
+Note: The response must be in valid JSON format, starting with { and ending with }.`;
 
     async function tryParseResponse(content) {
       try {
