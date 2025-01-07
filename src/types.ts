@@ -9,14 +9,15 @@ export interface Detection {
   score: number;
 }
 
+export interface TranslatedWord {
+  en: string;
+  zh: string;
+}
+
 export interface VisionAnalysisResult {
   description: string;
   keywords: string[];
   scene: string;
-  detection: any[];
-  openaiFiltered?: {
-    description: string;
-    keywords: string[];
-    scene: string;
-  };
+  detection?: Detection[];
+  translations?: TranslatedWord[];
 } 
