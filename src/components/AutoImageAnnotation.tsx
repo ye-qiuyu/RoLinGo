@@ -32,6 +32,10 @@ export const AutoImageAnnotation: React.FC<Props> = ({
   const imageRef = useRef<HTMLImageElement>(null);
   const [imageDimensions, setImageDimensions] = useState<{width: number; height: number; top: number; left: number} | null>(null);
   const [labelSizes, setLabelSizes] = useState<Map<number, {width: number; height: number}>>(new Map());
+  const [positions, setPositions] = useState<Map<number, { left: number; top: number }>>(new Map());
+  const [isDragging, setIsDragging] = useState<number | null>(null);
+  const dragStartPos = useRef<{ x: number; y: number } | null>(null);
+  const labelStartPos = useRef<{ left: number; top: number } | null>(null);
 
   // 计算两个矩形的重叠百分比（相对于第一个矩形的面积）
   const calculateOverlapPercentage = (rect1: { left: number; top: number; width: number; height: number }, rect2: { left: number; top: number; width: number; height: number }) => {
@@ -49,38 +53,11 @@ export const AutoImageAnnotation: React.FC<Props> = ({
         const imageRect = imageRef.current.getBoundingClientRect();
         const containerRect = containerRef.current.getBoundingClientRect();
         
-        // 计算图片在容器中的实际位置和尺寸
-        const imageStyle = window.getComputedStyle(imageRef.current);
-        const imageWidth = parseFloat(imageStyle.width);
-        const imageHeight = parseFloat(imageStyle.height);
-        
-        // 计算图片的实际显示区域（考虑 object-contain 的影响）
-        const containerWidth = containerRect.width;
-        const containerHeight = containerRect.height;
-        const imageAspectRatio = imageWidth / imageHeight;
-        const containerAspectRatio = containerWidth / containerHeight;
-        
-        let actualWidth, actualHeight, offsetLeft, offsetTop;
-        
-        if (imageAspectRatio > containerAspectRatio) {
-          // 图片较宽，将填满容器宽度
-          actualWidth = containerWidth;
-          actualHeight = containerWidth / imageAspectRatio;
-          offsetLeft = 0;
-          offsetTop = (containerHeight - actualHeight) / 2;
-        } else {
-          // 图片较高，将填满容器高度
-          actualHeight = containerHeight;
-          actualWidth = containerHeight * imageAspectRatio;
-          offsetLeft = (containerWidth - actualWidth) / 2;
-          offsetTop = 0;
-        }
-
         const dimensions = {
-          width: actualWidth,
-          height: actualHeight,
-          top: offsetTop,
-          left: offsetLeft
+          width: imageRect.width,
+          height: imageRect.height,
+          top: imageRect.top - containerRect.top,
+          left: imageRect.left - containerRect.left
         };
         
         console.log('Image actual dimensions:', dimensions);
@@ -127,7 +104,7 @@ export const AutoImageAnnotation: React.FC<Props> = ({
       testDiv.textContent = detection.keyword;
       const rect = testDiv.getBoundingClientRect();
       const widthPercent = (rect.width / imageDimensions.width) * 100;
-      const heightPercent = (rect.height / imageDimensions.height) * 100;
+      const heightPercent = (rect.height * 2 / imageDimensions.height) * 100;
       newLabelSizes.set(index, { width: widthPercent, height: heightPercent });
       console.log(`Label size for "${detection.keyword}":`, { widthPercent, heightPercent });
     });
@@ -139,7 +116,7 @@ export const AutoImageAnnotation: React.FC<Props> = ({
         testDiv.textContent = keyword;
         const rect = testDiv.getBoundingClientRect();
         const widthPercent = (rect.width / imageDimensions.width) * 100;
-        const heightPercent = (rect.height / imageDimensions.height) * 100;
+        const heightPercent = (rect.height * 2 / imageDimensions.height) * 100;
         newLabelSizes.set(startIndex + index, { width: widthPercent, height: heightPercent });
         console.log(`OpenAI label size for "${keyword}":`, { widthPercent, heightPercent });
       });
@@ -355,14 +332,98 @@ export const AutoImageAnnotation: React.FC<Props> = ({
     return positions;
   };
 
-  const labelPositions = useMemo(() => calculateAllLabelPositions(), [detections, openaiKeywords, imageDimensions, labelSizes]);
+  // 初始化标签位置
+  useEffect(() => {
+    if (imageDimensions && labelSizes.size > 0) {
+      const initialPositions = calculateAllLabelPositions();
+      setPositions(initialPositions);
+    }
+  }, [detections, openaiKeywords, imageDimensions, labelSizes]);
 
   // 添加调试信息
   console.log('Render state:', {
     imageDimensions,
     labelSizes: Array.from(labelSizes.entries()),
-    labelPositions: Array.from(labelPositions.entries())
+    labelPositions: Array.from(positions.entries())
   });
+
+  // 处理拖拽开始
+  const handleDragStart = (event: React.MouseEvent, index: number) => {
+    event.preventDefault();
+    const position = positions.get(index);
+    if (!position || !containerRef.current || !imageDimensions) return;
+
+    const containerRect = containerRef.current.getBoundingClientRect();
+    
+    // 记录鼠标相对于图片的初始位置
+    dragStartPos.current = {
+      x: event.clientX - containerRect.left - imageDimensions.left,
+      y: event.clientY - containerRect.top - imageDimensions.top
+    };
+    labelStartPos.current = { ...position };
+    setIsDragging(index);
+  };
+
+  // 处理拖拽过程
+  const handleDrag = (event: MouseEvent) => {
+    if (isDragging === null || !dragStartPos.current || !labelStartPos.current || !imageDimensions) return;
+
+    const labelSize = labelSizes.get(isDragging);
+    if (!labelSize) return;
+
+    // 获取容器的位置
+    const containerRect = containerRef.current?.getBoundingClientRect();
+    if (!containerRect) return;
+
+    // 计算鼠标相对于图片的位置（百分比）
+    const mouseX = event.clientX - containerRect.left - imageDimensions.left;
+    const mouseY = event.clientY - containerRect.top - imageDimensions.top;
+    const deltaX = ((mouseX - dragStartPos.current.x) / imageDimensions.width) * 100;
+    const deltaY = ((mouseY - dragStartPos.current.y) / imageDimensions.height) * 100;
+
+    // 计算新位置
+    let newLeft = labelStartPos.current.left + deltaX;
+    let newTop = labelStartPos.current.top + deltaY;
+
+    // 确保标签不会超出图片边界
+    const minMarginPixels = 10;
+    const marginX = (minMarginPixels / imageDimensions.width) * 100;
+    const marginY = (minMarginPixels / imageDimensions.height) * 100;
+
+    // 计算边界（相对于图片的百分比位置）
+    const minLeft = marginX;
+    const maxLeft = 100 - labelSize.width - marginX;
+    const minTop = marginY + (labelSize.height / 4);
+    const maxTop = 100 - (labelSize.height / 4) - marginY;
+
+    // 限制在边界内
+    newLeft = Math.min(Math.max(minLeft, newLeft), maxLeft);
+    newTop = Math.min(Math.max(minTop, newTop), maxTop);
+
+    // 更新位置
+    const newPositions = new Map(positions);
+    newPositions.set(isDragging, { left: newLeft, top: newTop });
+    setPositions(newPositions);
+  };
+
+  // 处理拖拽结束
+  const handleDragEnd = () => {
+    setIsDragging(null);
+    dragStartPos.current = null;
+    labelStartPos.current = null;
+  };
+
+  // 添加和移除全局鼠标事件监听器
+  useEffect(() => {
+    if (isDragging !== null) {
+      window.addEventListener('mousemove', handleDrag);
+      window.addEventListener('mouseup', handleDragEnd);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleDrag);
+      window.removeEventListener('mouseup', handleDragEnd);
+    };
+  }, [isDragging]);
 
   return (
     <div 
@@ -401,11 +462,8 @@ export const AutoImageAnnotation: React.FC<Props> = ({
         >
           {/* 渲染 AWS 检测标签 */}
           {detections.map((detection, index) => {
-            const position = labelPositions.get(index);
-            if (!position) {
-              console.log(`No position for detection ${index}`);
-              return null;
-            }
+            const position = positions.get(index);
+            if (!position) return null;
             return (
               <div
                 key={`aws-${index}`}
@@ -413,8 +471,11 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                 style={{
                   left: `${position.left}%`,
                   top: `${position.top}%`,
-                  zIndex: 10
+                  zIndex: isDragging === index ? 30 : 10,
+                  cursor: 'move',
+                  pointerEvents: 'auto'
                 }}
+                onMouseDown={(e) => handleDragStart(e, index)}
               >
                 <div 
                   className="inline-block font-bold text-black px-4 py-2 rounded-md whitespace-nowrap"
@@ -425,7 +486,7 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                     transform: 'translateY(-50%)',
                     fontSize: '1.4rem',
                     lineHeight: '1.6',
-                    zIndex: 20 
+                    userSelect: 'none'
                   }}
                 >
                   {detection.keyword}
@@ -436,11 +497,8 @@ export const AutoImageAnnotation: React.FC<Props> = ({
 
           {/* 渲染 OpenAI 关键词标签 */}
           {openaiKeywords?.map((keyword, index) => {
-            const position = labelPositions.get(detections.length + index);
-            if (!position) {
-              console.log(`No position for OpenAI keyword ${index}`);
-              return null;
-            }
+            const position = positions.get(detections.length + index);
+            if (!position) return null;
             return (
               <div
                 key={`openai-${index}`}
@@ -448,8 +506,11 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                 style={{
                   left: `${position.left}%`,
                   top: `${position.top}%`,
-                  zIndex: 10
+                  zIndex: isDragging === (detections.length + index) ? 30 : 10,
+                  cursor: 'move',
+                  pointerEvents: 'auto'
                 }}
+                onMouseDown={(e) => handleDragStart(e, detections.length + index)}
               >
                 <div 
                   className="inline-block font-bold text-black px-4 py-2 rounded-md whitespace-nowrap"
@@ -460,7 +521,7 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                     transform: 'translateY(-50%)',
                     fontSize: '1.4rem',
                     lineHeight: '1.6',
-                    zIndex: 20 
+                    userSelect: 'none'
                   }}
                 >
                   {keyword}
