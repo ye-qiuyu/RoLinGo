@@ -30,7 +30,7 @@ export const AutoImageAnnotation: React.FC<Props> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
-  const [imageDimensions, setImageDimensions] = useState<{width: number; height: number; top: number} | null>(null);
+  const [imageDimensions, setImageDimensions] = useState<{width: number; height: number; top: number; left: number} | null>(null);
   const [labelSizes, setLabelSizes] = useState<Map<number, {width: number; height: number}>>(new Map());
 
   // 计算两个矩形的重叠百分比（相对于第一个矩形的面积）
@@ -48,12 +48,42 @@ export const AutoImageAnnotation: React.FC<Props> = ({
       if (imageRef.current && containerRef.current) {
         const imageRect = imageRef.current.getBoundingClientRect();
         const containerRect = containerRef.current.getBoundingClientRect();
+        
+        // 计算图片在容器中的实际位置和尺寸
+        const imageStyle = window.getComputedStyle(imageRef.current);
+        const imageWidth = parseFloat(imageStyle.width);
+        const imageHeight = parseFloat(imageStyle.height);
+        
+        // 计算图片的实际显示区域（考虑 object-contain 的影响）
+        const containerWidth = containerRect.width;
+        const containerHeight = containerRect.height;
+        const imageAspectRatio = imageWidth / imageHeight;
+        const containerAspectRatio = containerWidth / containerHeight;
+        
+        let actualWidth, actualHeight, offsetLeft, offsetTop;
+        
+        if (imageAspectRatio > containerAspectRatio) {
+          // 图片较宽，将填满容器宽度
+          actualWidth = containerWidth;
+          actualHeight = containerWidth / imageAspectRatio;
+          offsetLeft = 0;
+          offsetTop = (containerHeight - actualHeight) / 2;
+        } else {
+          // 图片较高，将填满容器高度
+          actualHeight = containerHeight;
+          actualWidth = containerHeight * imageAspectRatio;
+          offsetLeft = (containerWidth - actualWidth) / 2;
+          offsetTop = 0;
+        }
+
         const dimensions = {
-          width: imageRect.width,
-          height: imageRect.height,
-          top: imageRect.top - containerRect.top
+          width: actualWidth,
+          height: actualHeight,
+          top: offsetTop,
+          left: offsetLeft
         };
-        console.log('Image dimensions updated:', dimensions);
+        
+        console.log('Image actual dimensions:', dimensions);
         setImageDimensions(dimensions);
       }
     };
@@ -86,9 +116,9 @@ export const AutoImageAnnotation: React.FC<Props> = ({
     const testDiv = document.createElement('div');
     testDiv.style.position = 'absolute';
     testDiv.style.visibility = 'hidden';
-    testDiv.style.fontSize = '1.1rem';
-    testDiv.style.lineHeight = '1.4';
-    testDiv.style.padding = '0.25rem 0.75rem';
+    testDiv.style.fontSize = '1.4rem';
+    testDiv.style.lineHeight = '1.6';
+    testDiv.style.padding = '0.5rem 1rem';
     testDiv.style.fontWeight = 'bold';
     document.body.appendChild(testDiv);
 
@@ -134,17 +164,31 @@ export const AutoImageAnnotation: React.FC<Props> = ({
 
     // 严格的边界检查函数
     const strictEnsureInBounds = (pos: { left: number; top: number }, labelWidth: number, labelHeight: number) => {
+      if (!imageDimensions) return pos;
+
+      const minMarginPixels = 10; // 与图片边缘的最小像素距离
+      
+      // 将像素边距转换为相对于图片实际尺寸的百分比
       const marginX = (minMarginPixels / imageDimensions.width) * 100;
       const marginY = (minMarginPixels / imageDimensions.height) * 100;
-      
-      // 确保位置在有效范围内，添加额外的安全边距
       const safetyMargin = 1; // 1% 的额外安全边距
-      const maxLeft = 100 - labelWidth - marginX - safetyMargin;
-      const maxTop = 100 - labelHeight - marginY - safetyMargin;
-      
-      const left = Math.min(Math.max(marginX + safetyMargin, pos.left), maxLeft);
-      const top = Math.min(Math.max(marginY + safetyMargin, pos.top), maxTop);
-      
+
+      // 考虑图片的实际位置和尺寸
+      const effectiveLeft = imageDimensions.left / imageDimensions.width * 100;
+      const effectiveTop = imageDimensions.top / imageDimensions.height * 100;
+      const effectiveWidth = 100 - (2 * effectiveLeft);
+      const effectiveHeight = 100 - (2 * effectiveTop);
+
+      // 计算有效的边界范围
+      const minLeft = effectiveLeft + marginX + safetyMargin;
+      const maxLeft = effectiveLeft + effectiveWidth - labelWidth - marginX - safetyMargin;
+      const minTop = effectiveTop + marginY + safetyMargin;
+      const maxTop = effectiveTop + effectiveHeight - labelHeight - marginY - safetyMargin;
+
+      // 确保位置在有效范围内
+      const left = Math.min(Math.max(minLeft, pos.left), maxLeft);
+      const top = Math.min(Math.max(minTop, pos.top), maxTop);
+
       return { left, top };
     };
 
@@ -324,14 +368,23 @@ export const AutoImageAnnotation: React.FC<Props> = ({
     <div 
       ref={containerRef}
       className={`relative ${className}`} 
-      style={{ width: '100%', height: '100%' }}
+      style={{ 
+        width: '100%', 
+        height: '100%',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center'
+      }}
     >
       <img
         ref={imageRef}
         src={imageUrl}
         alt="分析图片"
-        className="w-full h-auto object-contain"
-        style={{ maxHeight: '70vh' }}
+        className="w-auto h-auto object-contain"
+        style={{ 
+          maxHeight: '70vh',
+          maxWidth: '100%'
+        }}
         onLoad={() => console.log('Image loaded')}
       />
       
@@ -339,10 +392,11 @@ export const AutoImageAnnotation: React.FC<Props> = ({
         <div 
           className="absolute" 
           style={{
-            left: 0,
-            top: 0,
-            width: '100%',
-            height: '100%'
+            left: `${imageDimensions.left}px`,
+            top: `${imageDimensions.top}px`,
+            width: `${imageDimensions.width}px`,
+            height: `${imageDimensions.height}px`,
+            pointerEvents: 'none'
           }}
         >
           {/* 渲染 AWS 检测标签 */}
@@ -363,14 +417,14 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                 }}
               >
                 <div 
-                  className="inline-block font-bold text-black px-3 py-1 rounded-md whitespace-nowrap"
+                  className="inline-block font-bold text-black px-4 py-2 rounded-md whitespace-nowrap"
                   style={{ 
                     backgroundColor: 'rgba(255, 255, 0, 0.7)',
                     backdropFilter: 'blur(2px)',
-                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
                     transform: 'translateY(-50%)',
-                    fontSize: '1.1rem',
-                    lineHeight: '1.4',
+                    fontSize: '1.4rem',
+                    lineHeight: '1.6',
                     zIndex: 20 
                   }}
                 >
@@ -398,14 +452,14 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                 }}
               >
                 <div 
-                  className="inline-block font-bold text-black px-3 py-1 rounded-md whitespace-nowrap"
+                  className="inline-block font-bold text-black px-4 py-2 rounded-md whitespace-nowrap"
                   style={{ 
-                    backgroundColor: 'rgba(34, 197, 94, 0.7)', // 绿色半透明
+                    backgroundColor: 'rgba(34, 197, 94, 0.7)',
                     backdropFilter: 'blur(2px)',
-                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
                     transform: 'translateY(-50%)',
-                    fontSize: '1.1rem',
-                    lineHeight: '1.4',
+                    fontSize: '1.4rem',
+                    lineHeight: '1.6',
                     zIndex: 20 
                   }}
                 >

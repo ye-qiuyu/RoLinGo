@@ -186,29 +186,15 @@ const ImageProcess = () => {
         )}
 
         {analysis && (
-          <div className="mt-4 space-y-4">
-            <div className="bg-gray-100 p-4 rounded-lg">
-              <h3 className="font-medium text-gray-700">场景类型</h3>
-              <p className="mt-1">{analysis.scene}</p>
-            </div>
-            <div className="bg-gray-100 p-4 rounded-lg">
-              <h3 className="font-medium text-gray-700">关键词</h3>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {analysis.keywords.map((keyword: string, index: number) => (
-                  <span
-                    key={index}
-                    className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
-                  >
-                    {keyword}
-                  </span>
-                ))}
-              </div>
+          <div className="mt-4">
+            <div className="text-center">
+              <p className="text-2xl font-bold mb-6">{analysis.scene}</p>
             </div>
           </div>
         )}
 
         {/* 角色选择区域 */}
-        <div className="mt-6 flex justify-between items-center px-4">
+        <div className="mt-4 flex justify-between items-center px-4">
           {roles.map((role) => (
             <div
               key={role.id}
@@ -225,7 +211,7 @@ const ImageProcess = () => {
         </div>
 
         {/* 文本显示区域 */}
-        <div className="mt-6 bg-orange-100 rounded-lg p-4">
+        <div className="mt-4 bg-orange-100 rounded-lg p-4">
           <p className="text-lg">
             {analysis?.description || '等待分析结果...'}
           </p>
