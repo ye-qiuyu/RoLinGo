@@ -44,6 +44,9 @@ export const AutoImageAnnotation: React.FC<Props> = ({
   const dragStartTime = useRef<number>(0);
   const flipTimersRef = useRef<Map<number, NodeJS.Timeout>>(new Map());
   const [translations, setTranslations] = useState<Map<string, string>>(new Map());
+  const [isReading, setIsReading] = useState<boolean>(false);
+  const clickCountRef = useRef<number>(0);
+  const clickTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // 计算两个矩形的重叠百分比（相对于第一个矩形的面积）
   const calculateOverlapPercentage = (rect1: { left: number; top: number; width: number; height: number }, rect2: { left: number; top: number; width: number; height: number }) => {
@@ -433,45 +436,64 @@ export const AutoImageAnnotation: React.FC<Props> = ({
     };
   }, [isDragging]);
 
-  // 清理定时器
-  useEffect(() => {
-    return () => {
-      // 组件卸载时清理所有定时器
-      flipTimersRef.current.forEach(timer => clearTimeout(timer));
-      flipTimersRef.current.clear();
-    };
-  }, []);
-
-  // 处理标签点击
-  const handleLabelClick = (event: React.MouseEvent, index: number) => {
+  // 处理鼠标点击
+  const handleMouseClick = (event: React.MouseEvent, index: number, text: string) => {
     event.preventDefault();
-    // 如果正在拖动或者从开始拖动到现在的时间超过200ms，则认为是拖动而不是点击
-    if (isDragging !== null || Date.now() - dragStartTime.current > 200) return;
+    event.stopPropagation();
     
-    // 清除已存在的定时器
-    const existingTimer = flipTimersRef.current.get(index);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-      flipTimersRef.current.delete(index);
+    // 如果正在拖动，不处理点击
+    if (isDragging !== null || Date.now() - dragStartTime.current > 200) return;
+
+    clickCountRef.current += 1;
+
+    if (clickTimerRef.current) {
+      clearTimeout(clickTimerRef.current);
     }
 
-    setFlippedLabels(prev => {
-      const newFlipped = new Set(prev);
-      if (!newFlipped.has(index)) {
-        newFlipped.add(index);
-        // 设置2秒后自动翻转回来的定时器
-        const timer = setTimeout(() => {
-          setFlippedLabels(current => {
-            const updated = new Set(current);
-            updated.delete(index);
-            return updated;
-          });
+    clickTimerRef.current = setTimeout(() => {
+      // 根据点击次数执行相应操作
+      if (clickCountRef.current === 1) {
+        // 单击：翻转
+        const existingTimer = flipTimersRef.current.get(index);
+        if (existingTimer) {
+          clearTimeout(existingTimer);
           flipTimersRef.current.delete(index);
-        }, 2000);
-        flipTimersRef.current.set(index, timer);
+        }
+
+        setFlippedLabels(prev => {
+          const newFlipped = new Set(prev);
+          if (!newFlipped.has(index)) {
+            newFlipped.add(index);
+            const timer = setTimeout(() => {
+              setFlippedLabels(current => {
+                const updated = new Set(current);
+                updated.delete(index);
+                return updated;
+              });
+              flipTimersRef.current.delete(index);
+            }, 2000);
+            flipTimersRef.current.set(index, timer);
+          }
+          return newFlipped;
+        });
+      } else if (clickCountRef.current === 2) {
+        // 双击：朗读
+        speakText(text);
       }
-      return newFlipped;
-    });
+
+      // 重置点击计数
+      clickCountRef.current = 0;
+    }, 200); // 200ms 内的点击会被认为是同一次点击序列
+  };
+
+  // 添加语音合成功能
+  const speakText = (text: string) => {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'en-US';
+    utterance.rate = 0.9; // 稍微放慢语速
+    utterance.onstart = () => setIsReading(true);
+    utterance.onend = () => setIsReading(false);
+    window.speechSynthesis.speak(utterance);
   };
 
   // 加载翻译
@@ -486,6 +508,17 @@ export const AutoImageAnnotation: React.FC<Props> = ({
         });
     }
   }, [analysisResult]);
+
+  // 组件卸载时清理定时器
+  useEffect(() => {
+    return () => {
+      if (clickTimerRef.current) {
+        clearTimeout(clickTimerRef.current);
+      }
+      flipTimersRef.current.forEach(timer => clearTimeout(timer));
+      flipTimersRef.current.clear();
+    };
+  }, []);
 
   return (
     <div 
@@ -544,7 +577,7 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                   transformOrigin: '50% 50%'
                 }}
                 onMouseDown={(e) => handleDragStart(e, index)}
-                onClick={(e) => handleLabelClick(e, index)}
+                onClick={(e) => handleMouseClick(e, index, detection.keyword)}
               >
                 <div 
                   className="inline-block font-bold text-black px-4 py-2 rounded-md whitespace-nowrap backface-hidden"
@@ -606,7 +639,7 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                   transformOrigin: '50% 50%'
                 }}
                 onMouseDown={(e) => handleDragStart(e, detections.length + index)}
-                onClick={(e) => handleLabelClick(e, detections.length + index)}
+                onClick={(e) => handleMouseClick(e, detections.length + index, keyword)}
               >
                 <div 
                   className="inline-block font-bold text-black px-4 py-2 rounded-md whitespace-nowrap backface-hidden"
