@@ -306,45 +306,6 @@ app.post('/api/vision', async (req, res) => {
   }
 });
 
-// 翻译 API 端点
-app.post('/api/translate', async (req, res) => {
-  try {
-    const { words } = req.body;
-    if (!Array.isArray(words) || words.length === 0) {
-      return res.status(400).json({ error: 'Invalid input: words must be a non-empty array' });
-    }
-
-    // 构建 OpenAI 的提示
-    const prompt = `Please translate the following English words to Chinese. Return the result in JSON format with "translations" as the key, and each item should have "en" and "zh" fields.
-Words to translate: ${words.join(', ')}
-
-Example format:
-{
-  "translations": [
-    { "en": "hello", "zh": "你好" },
-    { "en": "world", "zh": "世界" }
-  ]
-}`;
-
-    const completion = await openaiClient.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-      response_format: { type: "json_object" }
-    });
-
-    const result = JSON.parse(completion.choices[0]?.message?.content || '{}');
-    res.json(result.translations);
-  } catch (error) {
-    console.error('Translation error:', error);
-    res.status(500).json({ error: 'Translation failed' });
-  }
-});
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`代理服务器运行在 http://localhost:${PORT}`);

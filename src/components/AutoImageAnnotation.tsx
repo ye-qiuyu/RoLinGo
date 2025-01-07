@@ -1,6 +1,19 @@
 import React, { useMemo, useRef, useEffect, useState } from 'react';
-import { Detection, TranslatedWord } from '../types';
-import { translateWords } from '../services/translationService';
+
+interface Detection {
+  location: {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  };
+  keyword: string;
+  score: number;
+}
+
+interface OpenAIKeyword {
+  text: string;
+}
 
 interface Props {
   imageUrl: string;
@@ -26,7 +39,6 @@ export const AutoImageAnnotation: React.FC<Props> = ({
   const labelStartPos = useRef<{ left: number; top: number } | null>(null);
   const dragStartTime = useRef<number>(0);
   const flipTimersRef = useRef<Map<number, NodeJS.Timeout>>(new Map());
-  const [translations, setTranslations] = useState<Map<string, string>>(new Map());
 
   // 计算两个矩形的重叠百分比（相对于第一个矩形的面积）
   const calculateOverlapPercentage = (rect1: { left: number; top: number; width: number; height: number }, rect2: { left: number; top: number; width: number; height: number }) => {
@@ -457,27 +469,6 @@ export const AutoImageAnnotation: React.FC<Props> = ({
     });
   };
 
-  // 获取所有需要翻译的词
-  useEffect(() => {
-    const allWords = new Set([
-      ...detections.map(d => d.keyword),
-      ...(openaiKeywords || [])
-    ]);
-
-    const fetchTranslations = async () => {
-      const words = Array.from(allWords);
-      const translatedWords = await translateWords(words);
-      const translationMap = new Map(
-        translatedWords.map(t => [t.en, t.zh])
-      );
-      setTranslations(translationMap);
-    };
-
-    if (allWords.size > 0) {
-      fetchTranslations();
-    }
-  }, [detections, openaiKeywords]);
-
   return (
     <div 
       ref={containerRef}
@@ -566,7 +557,7 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                     top: 0
                   }}
                 >
-                  {translations.get(detection.keyword) || '翻译中...'}
+                  {detection.keyword}
                 </div>
               </div>
             );
@@ -624,7 +615,7 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                     top: 0
                   }}
                 >
-                  {translations.get(keyword) || '翻译中...'}
+                  {keyword}
                 </div>
               </div>
             );
