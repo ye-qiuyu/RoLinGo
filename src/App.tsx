@@ -1,38 +1,40 @@
-import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
-import Home from './pages/Home';
-import ImageProcess from './pages/ImageProcess';
-import BottomNav from './components/Layout/BottomNav';
-import './App.css';
-
-const AppContent = () => {
-  const location = useLocation();
-  const showBottomNav = location.pathname !== '/process';
-
-  return (
-    <div className="flex flex-col min-h-screen bg-gray-100">
-      <div className={`flex-1 overflow-auto ${showBottomNav ? 'pb-16' : ''}`}>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/process" element={<ImageProcess />} />
-          <Route 
-            path="/profile" 
-            element={
-              <div className="p-4">
-                Profile Page (Coming Soon)
-              </div>
-            } 
-          />
-        </Routes>
-      </div>
-      {showBottomNav && <BottomNav />}
-    </div>
-  );
-};
+import { useEffect } from 'react';
+import { BrowserRouter as Router } from 'react-router-dom';
+import AppRoutes from './routes';
+import Layout from './components/Layout';
+import { initializeVocabularyService } from './services/visionService';
 
 function App() {
+  useEffect(() => {
+    // 初始化词汇服务
+    const initializeServices = async () => {
+      try {
+        console.log('开始初始化词汇服务...');
+        await initializeVocabularyService();
+        console.log('词汇服务初始化成功');
+      } catch (error) {
+        console.error('词汇服务初始化失败:', error);
+        // 尝试重新初始化
+        setTimeout(async () => {
+          try {
+            console.log('尝试重新初始化词汇服务...');
+            await initializeVocabularyService();
+            console.log('词汇服务重新初始化成功');
+          } catch (retryError) {
+            console.error('词汇服务重新初始化失败:', retryError);
+          }
+        }, 2000);
+      }
+    };
+
+    initializeServices();
+  }, []);
+
   return (
     <Router>
-      <AppContent />
+      <Layout>
+        <AppRoutes />
+      </Layout>
     </Router>
   );
 }

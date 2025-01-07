@@ -86,81 +86,112 @@ validateAWSCredentials().catch(error => {
   console.error('AWS 凭证验证失败:', error.message);
 });
 
-// 使用 OpenAI 优化结果
-async function optimizeWithOpenAI(keywords, scores, base64Image) {
+// 尝试解析 JSON 响应
+async function tryParseResponse(content) {
   try {
-    const prompt = `As a professional image description expert, please analyze this image.
-
-${keywords.length > 0 ? `
-Keywords and confidence scores detected by AWS:
-${keywords.map((kw, i) => `${kw} (${scores[i]})`).join('\n')}
-` : ''}
-
-Please carefully observe the image content and combine your observations${keywords.length > 0 ? ' with the keywords above' : ''} to return the following information in JSON format:
-1. description: Provide a fluent scene description that:
-   - Starts with the most prominent visual elements
-   - Includes environment, atmosphere, actions, or states
-   - Uses specific and vivid adjectives
-   - Avoids repetitive language and uncertain expressions
-2. keywords: 3-5 most important keywords, ordered by importance, including:
-   - Main objects/subjects
-   - Scene characteristics
-   - Prominent visual elements
-   - Atmosphere or emotional features
-3. scene: A concise and accurate scene type classification
-
-Please ensure the description flows naturally, avoiding mechanical listing, and make it more vivid and lively.
-Note: The response must be in valid JSON format, starting with { and ending with }.`;
-
-    async function tryParseResponse(content) {
-      try {
-        // 尝试提取 JSON 部分
-        const jsonMatch = content.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          return JSON.parse(jsonMatch[0]);
-        }
-        return null;
-      } catch (e) {
-        return null;
-      }
+    // 尝试提取 JSON 部分
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
     }
+    return null;
+  } catch (e) {
+    console.error('JSON 解析失败:', e);
+    return null;
+  }
+}
 
-    async function retryWithFormat(originalContent) {
-      const formatPrompt = `
+// 尝试修复格式并重试
+async function retryWithFormat(originalContent) {
+  const formatPrompt = `
 请将以下内容转换为合法的 JSON 格式，保持原有的创造性描述不变：
 
 ${originalContent}
 
 请严格按照以下格式返回：
 {
-  "description": "场景描述",
-  "keywords": ["关键词1", "关键词2", "关键词3"],
-  "scene": "场景类型"
+  "keywords": {
+    "basic": ["word1", "word2", "word3"],
+    "intermediate": ["word1", "word2", "word3"],
+    "advanced": ["word1", "word2", "word3"]
+  },
+  "descriptions": {
+    "basic": "Basic level description",
+    "intermediate": "Intermediate level description",
+    "advanced": "Advanced level description"
+  },
+  "scene": "Scene type"
 }`;
 
-      const formatResponse = await openaiClient.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-          {
-            role: 'user',
-            content: formatPrompt,
-          },
-        ],
-        max_tokens: 500,
-        temperature: 0.5,
-      });
+  const formatResponse = await openaiClient.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [
+      {
+        role: 'user',
+        content: formatPrompt,
+      },
+    ],
+    max_tokens: 1000,
+    temperature: 0.5,
+  });
 
-      return formatResponse.choices[0]?.message?.content;
-    }
+  return formatResponse.choices[0]?.message?.content;
+}
+
+// 使用 OpenAI 优化结果
+async function optimizeWithOpenAI(keywords, scores, base64Image) {
+  try {
+    const systemPrompt = `You are a professional image description expert with extensive knowledge of English vocabulary across all CEFR levels (A1-C2). Your task is to analyze images and provide comprehensive descriptions and keywords that span across different proficiency levels.`;
+
+    const userPrompt = `Please analyze the image and provide:
+
+1. Keywords (20 keywords total):
+   Provide a diverse set of keywords that capture the image's elements while ensuring a balanced distribution across CEFR levels:
+   - Basic (A1-A2): 6-7 keywords for essential elements
+   - Intermediate (B1-B2): 6-7 keywords for more nuanced aspects
+   - Advanced (C1-C2): 6-7 keywords for sophisticated or technical elements
+   
+   Consider:
+   - Main objects and subjects (use precise terminology)
+   - Scene characteristics (employ varied vocabulary)
+   - Visual elements (include technical terms where appropriate)
+   - Abstract concepts and implications
+   - Academic and specialized vocabulary
+   
+   Aim to use:
+   - A1-A2: Basic vocabulary (e.g., "book", "teacher")
+   - B1-B2: More sophisticated terms (e.g., "curriculum", "presentation")
+   - C1-C2: Advanced vocabulary (e.g., "pedagogical", "methodology")
+
+2. Scene Descriptions (one for each level):
+   - Basic (A1-A2): Use simple vocabulary and basic sentence structures
+   - Intermediate (B1-B2): Use moderate vocabulary and varied sentence structures
+   - Advanced (C1-C2): Use sophisticated vocabulary, academic terms, and complex sentence structures
+
+3. Scene Type: A precise and technical scene type classification
+
+Format the response as a JSON object with the following structure:
+{
+  "keywords": ["keyword1", "keyword2", "keyword3", ...],
+  "descriptions": {
+    "basic": "...",
+    "intermediate": "...",
+    "advanced": "..."
+  },
+  "scene": "..."
+}
+
+${keywords.length > 0 ? `\nAWS detected keywords with confidence scores:\n${keywords.map((kw, i) => `${kw} (${scores[i]})`).join('\n')}` : ''}`;
 
     // 第一次尝试，直接使用图片
     const response = await openaiClient.chat.completions.create({
       model: 'gpt-4o',
       messages: [
+        { role: 'system', content: systemPrompt },
         {
           role: 'user',
           content: [
-            { type: 'text', text: prompt },
+            { type: 'text', text: userPrompt },
             {
               type: 'image_url',
               image_url: {
@@ -223,6 +254,7 @@ async function detectObjects(image) {
     };
 
     // 调用 AWS Rekognition
+    console.log('发送请求到 AWS Rekognition...');
     const command = new DetectLabelsCommand(params);
     const response = await rekognitionClient.send(command);
 
@@ -252,8 +284,16 @@ async function detectObjects(image) {
     return result;
   } catch (error) {
     console.error('AWS Rekognition 检测失败:', error);
+    console.error('错误详情:', {
+      name: error.name,
+      message: error.message,
+      code: error.code,
+      requestId: error.$metadata?.requestId,
+      stack: error.stack
+    });
+    
     if (error.name === 'InvalidImageFormatException') {
-      console.error('图片格式无效，请确保是有效的图片文件');
+      throw new Error('图片格式无效，请确保是有效的图片文件');
     }
     throw error;
   }
@@ -297,11 +337,15 @@ app.post('/api/vision', async (req, res) => {
     console.error('图像处理失败:', error);
     console.error('错误堆栈:', error.stack);
     if (error.response) {
-      console.error('错误响应:', error.response.data);
+      console.error('API 错误响应:', error.response.data);
     }
+    
+    // 返回更详细的错误信息
     res.status(500).json({ 
       error: error.message,
-      details: error.response?.data || error.stack
+      details: error.response?.data || error.stack,
+      type: error.name,
+      code: error.code
     });
   }
 });

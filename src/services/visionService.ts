@@ -1,4 +1,10 @@
-import { VisionAnalysisResult } from '../types';
+import { VisionAnalysisResult, Detection } from '../types';
+import { VocabularyService } from './vocabularyService';
+import { DIFFICULTY_LEVELS, VOCABULARY_DISPLAY_CONFIG } from '../config/vocabularyConfig';
+
+// 创建单例实例
+const vocabularyService = new VocabularyService();
+let currentDifficulty = DIFFICULTY_LEVELS.find(level => level.id === 'intermediate')!;
 
 // 定义相似关键词组
 const SIMILAR_KEYWORDS_GROUPS = [
@@ -8,7 +14,7 @@ const SIMILAR_KEYWORDS_GROUPS = [
 ];
 
 // 过滤相似关键词，只保留每组中置信度最高的一个
-const filterSimilarKeywords = (items: any[]) => {
+const filterSimilarKeywords = (items: Detection[]) => {
   console.log('开始过滤相似关键词，原始关键词：', items);
   let result = [...items];
   
@@ -43,6 +49,22 @@ const filterSimilarKeywords = (items: any[]) => {
   return result;
 };
 
+// 初始化词汇服务
+export const initializeVocabularyService = async () => {
+  await vocabularyService.loadWordList();
+};
+
+// 设置难度等级
+export const setDifficultyLevel = (levelId: string) => {
+  const newLevel = DIFFICULTY_LEVELS.find(level => level.id === levelId);
+  if (newLevel) {
+    currentDifficulty = newLevel;
+  } else {
+    console.warn(`未找到难度等级: ${levelId}, 使用当前难度等级`);
+  }
+};
+
+// 保持原有的 analyzeImage 函数
 export const analyzeImage = async (base64Image: string): Promise<VisionAnalysisResult> => {
   try {
     console.log('开始图片分析流程...');
@@ -57,55 +79,60 @@ export const analyzeImage = async (base64Image: string): Promise<VisionAnalysisR
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      // 尝试获取详细的错误信息
+      const errorData = await response.json().catch(() => null);
+      console.error('服务器错误详情:', errorData);
+      throw new Error(`HTTP error! status: ${response.status}, details: ${JSON.stringify(errorData)}`);
     }
 
     const result = await response.json();
     
-    // 过滤相似关键词
-    console.log('原始 AWS 结果：', result.aws.result);
-    result.aws.result = filterSimilarKeywords(result.aws.result);
-    console.log('过滤后的 AWS 结果：', result.aws.result);
-    
-    // 确保 detection 结果也使用过滤后的关键词
-    if (result.detection) {
-      result.detection = filterSimilarKeywords(result.detection);
+    // 验证返回的数据结构
+    if (!result.aws?.result || !result.optimized?.keywords) {
+      console.error('返回数据结构不完整:', result);
+      throw new Error('服务器返回的数据结构不完整');
     }
+    
+    // 首先过滤相似关键词
+    console.log('原始 AWS 结果：', result.aws.result);
+    const filteredAWSResult = filterSimilarKeywords(result.aws.result);
+    console.log('过滤相似关键词后的 AWS 结果：', filteredAWSResult);
 
-    // 获取 AWS 关键词列表（转换为小写以进行不区分大小写的比较）
-    const awsKeywords = result.aws.result.map((item: any) => item.keyword.toLowerCase());
+    // 使用词汇服务处理关键词
+    console.log('原始 OpenAI 关键词：', result.optimized.keywords);
+    console.log('原始 OpenAI 描述：', result.optimized.descriptions);
+
+    const processedKeywords = vocabularyService.processKeywords(
+      filteredAWSResult,
+      result.optimized.keywords || [],  // 确保传入数组
+      currentDifficulty
+    );
+
+    console.log('处理后的 AWS 关键词：', processedKeywords.awsKeywords);
+    console.log('处理后的 OpenAI 关键词：', processedKeywords.openaiKeywords);
     
-    // 过滤 OpenAI 关键词，移除与 AWS 重复的关键词
-    const openaiFiltered = {
-      ...result.optimized,
-      keywords: result.optimized.keywords.filter(
-        (keyword: string) => !awsKeywords.includes(keyword.toLowerCase())
-      )
-    };
-    
-    console.log('\n=== AWS Rekognition 识别结果 ===');
-    console.log('识别的关键词及置信度：');
-    result.aws.result.forEach((item: any) => {
-      console.log(`- ${item.keyword} (置信度: ${item.score})`);
-    });
-    
-    console.log('\n=== OpenAI 优化结果（已过滤重复关键词）===');
-    console.log('场景描述：', result.optimized.description);
-    console.log('原始关键词：', result.optimized.keywords.join(', '));
-    console.log('过滤后关键词：', openaiFiltered.keywords.join(', '));
-    console.log('场景类型：', result.optimized.scene);
-    console.log('================\n');
-    
-    // 返回完整结果，包括过滤后的 OpenAI 关键词
+    // 返回处理后的结果
     return {
-      description: result.optimized.description,
-      keywords: openaiFiltered.keywords,
+      description: result.optimized.descriptions[currentDifficulty.level],
+      keywords: processedKeywords.openaiKeywords,
       scene: result.optimized.scene,
-      detection: result.detection,
-      openaiFiltered
+      detection: processedKeywords.awsKeywords,
+      openaiFiltered: {
+        description: result.optimized.descriptions[currentDifficulty.level],
+        keywords: processedKeywords.openaiKeywords,
+        scene: result.optimized.scene
+      },
+      allLevels: {
+        descriptions: result.optimized.descriptions,
+        keywords: result.optimized.keywords
+      }
     };
   } catch (error) {
     console.error('图片分析过程出错：', error);
+    if (error instanceof Error) {
+      console.error('错误堆栈：', error.stack);
+      console.error('错误消息：', error.message);
+    }
     throw error;
   }
 }; 

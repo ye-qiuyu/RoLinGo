@@ -7,16 +7,29 @@ export interface Detection {
   };
   keyword: string;
   score: number;
+  cefrLevel?: string;
 }
 
 export interface VisionAnalysisResult {
   description: string;
   keywords: string[];
   scene: string;
-  detection: any[];
+  detection?: Detection[];
   openaiFiltered?: {
     description: string;
     keywords: string[];
     scene: string;
+  };
+  allLevels?: {
+    descriptions: {
+      basic: string;
+      intermediate: string;
+      advanced: string;
+    };
+    keywords: {
+      basic: string[];
+      intermediate: string[];
+      advanced: string[];
+    };
   };
 } 
