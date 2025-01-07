@@ -172,6 +172,7 @@ const ImageProcess = () => {
                 imageUrl={imageData}
                 detections={analysis?.detection || []}
                 openaiKeywords={analysis?.keywords || []}
+                analysisResult={analysis || undefined}
                 className="max-h-[70vh] object-contain"
               />
             )}

@@ -1,4 +1,6 @@
 import React, { useMemo, useRef, useEffect, useState } from 'react';
+import { translationService } from '../services/translationService';
+import { VisionAnalysisResult } from '../types';
 
 interface Detection {
   location: {
@@ -19,6 +21,7 @@ interface Props {
   imageUrl: string;
   detections: Detection[];
   openaiKeywords?: string[];
+  analysisResult?: VisionAnalysisResult;
   className?: string;
 }
 
@@ -26,6 +29,7 @@ export const AutoImageAnnotation: React.FC<Props> = ({
   imageUrl, 
   detections,
   openaiKeywords,
+  analysisResult,
   className = ''
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -39,6 +43,7 @@ export const AutoImageAnnotation: React.FC<Props> = ({
   const labelStartPos = useRef<{ left: number; top: number } | null>(null);
   const dragStartTime = useRef<number>(0);
   const flipTimersRef = useRef<Map<number, NodeJS.Timeout>>(new Map());
+  const [translations, setTranslations] = useState<Map<string, string>>(new Map());
 
   // 计算两个矩形的重叠百分比（相对于第一个矩形的面积）
   const calculateOverlapPercentage = (rect1: { left: number; top: number; width: number; height: number }, rect2: { left: number; top: number; width: number; height: number }) => {
@@ -469,6 +474,19 @@ export const AutoImageAnnotation: React.FC<Props> = ({
     });
   };
 
+  // 加载翻译
+  useEffect(() => {
+    if (analysisResult) {
+      translationService.translateKeywords(analysisResult)
+        .then(translations => {
+          setTranslations(translations);
+        })
+        .catch(error => {
+          console.error('加载翻译失败：', error);
+        });
+    }
+  }, [analysisResult]);
+
   return (
     <div 
       ref={containerRef}
@@ -522,7 +540,8 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                   pointerEvents: 'auto',
                   transformStyle: 'preserve-3d',
                   transition: 'transform 0.6s',
-                  transform: isFlipped ? 'rotateY(180deg)' : ''
+                  transform: isFlipped ? 'rotateY(180deg)' : '',
+                  transformOrigin: '50% 50%'
                 }}
                 onMouseDown={(e) => handleDragStart(e, index)}
                 onClick={(e) => handleLabelClick(e, index)}
@@ -537,7 +556,8 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                     fontSize: '1.4rem',
                     lineHeight: '1.6',
                     userSelect: 'none',
-                    backfaceVisibility: 'hidden'
+                    backfaceVisibility: 'hidden',
+                    position: 'relative'
                   }}
                 >
                   {detection.keyword}
@@ -553,11 +573,13 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                     lineHeight: '1.6',
                     userSelect: 'none',
                     backfaceVisibility: 'hidden',
+                    position: 'absolute',
                     left: 0,
-                    top: 0
+                    top: 0,
+                    width: '100%'
                   }}
                 >
-                  {detection.keyword}
+                  {translations.get(detection.keyword) || detection.keyword}
                 </div>
               </div>
             );
@@ -580,7 +602,8 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                   pointerEvents: 'auto',
                   transformStyle: 'preserve-3d',
                   transition: 'transform 0.6s',
-                  transform: isFlipped ? 'rotateY(180deg)' : ''
+                  transform: isFlipped ? 'rotateY(180deg)' : '',
+                  transformOrigin: '50% 50%'
                 }}
                 onMouseDown={(e) => handleDragStart(e, detections.length + index)}
                 onClick={(e) => handleLabelClick(e, detections.length + index)}
@@ -595,7 +618,8 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                     fontSize: '1.4rem',
                     lineHeight: '1.6',
                     userSelect: 'none',
-                    backfaceVisibility: 'hidden'
+                    backfaceVisibility: 'hidden',
+                    position: 'relative'
                   }}
                 >
                   {keyword}
@@ -611,11 +635,13 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                     lineHeight: '1.6',
                     userSelect: 'none',
                     backfaceVisibility: 'hidden',
+                    position: 'absolute',
                     left: 0,
-                    top: 0
+                    top: 0,
+                    width: '100%'
                   }}
                 >
-                  {keyword}
+                  {translations.get(keyword) || keyword}
                 </div>
               </div>
             );

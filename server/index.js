@@ -306,6 +306,84 @@ app.post('/api/vision', async (req, res) => {
   }
 });
 
+// 添加翻译 API 端点
+app.post('/api/translate', async (req, res) => {
+  try {
+    const { keywords } = req.body;
+    
+    if (!Array.isArray(keywords) || keywords.length === 0) {
+      return res.status(400).json({ error: '关键词列表不能为空' });
+    }
+
+    // 构建 OpenAI 的提示
+    const prompt = `请将以下英文关键词翻译成中文，保持专业准确性。
+关键词列表：${keywords.join(', ')}
+
+请以 JSON 数组格式返回结果，每个元素包含 en 和 zh 字段，例如：
+[
+  { "en": "example", "zh": "示例" }
+]`;
+
+    const response = await openaiClient.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+      max_tokens: 1000,
+      temperature: 0.3,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error('No content in response');
+    }
+
+    console.log('OpenAI 原始响应:', content);
+
+    // 尝试解析 JSON 响应
+    let translations;
+    try {
+      translations = JSON.parse(content);
+    } catch (parseError) {
+      console.error('JSON 解析错误:', parseError);
+      console.error('原始内容:', content);
+      // 如果解析失败，尝试提取 JSON 部分
+      const jsonMatch = content.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        try {
+          translations = JSON.parse(jsonMatch[0]);
+        } catch (secondError) {
+          throw new Error('无法解析翻译结果');
+        }
+      } else {
+        throw new Error('响应格式不正确');
+      }
+    }
+    
+    console.log('翻译结果：', translations);
+    res.json(translations);
+  } catch (error) {
+    console.error('翻译失败：', error);
+    console.error('错误详情：', {
+      message: error.message,
+      name: error.name,
+      stack: error.stack,
+      response: error.response?.data
+    });
+    res.status(500).json({ 
+      error: error.message,
+      details: {
+        name: error.name,
+        message: error.message,
+        response: error.response?.data
+      }
+    });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`代理服务器运行在 http://localhost:${PORT}`);

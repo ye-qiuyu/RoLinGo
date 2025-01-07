@@ -13,10 +13,12 @@ export interface VisionAnalysisResult {
   description: string;
   keywords: string[];
   scene: string;
-  detection: any[];
+  detection?: Detection[];
   openaiFiltered?: {
     description: string;
     keywords: string[];
     scene: string;
   };
-} 
+}
+
+export interface AnalysisResult extends VisionAnalysisResult {} 
