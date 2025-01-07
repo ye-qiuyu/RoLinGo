@@ -34,8 +34,11 @@ export const AutoImageAnnotation: React.FC<Props> = ({
   const [labelSizes, setLabelSizes] = useState<Map<number, {width: number; height: number}>>(new Map());
   const [positions, setPositions] = useState<Map<number, { left: number; top: number }>>(new Map());
   const [isDragging, setIsDragging] = useState<number | null>(null);
+  const [flippedLabels, setFlippedLabels] = useState<Set<number>>(new Set());
   const dragStartPos = useRef<{ x: number; y: number } | null>(null);
   const labelStartPos = useRef<{ left: number; top: number } | null>(null);
+  const dragStartTime = useRef<number>(0);
+  const flipTimersRef = useRef<Map<number, NodeJS.Timeout>>(new Map());
 
   // 计算两个矩形的重叠百分比（相对于第一个矩形的面积）
   const calculateOverlapPercentage = (rect1: { left: number; top: number; width: number; height: number }, rect2: { left: number; top: number; width: number; height: number }) => {
@@ -350,12 +353,12 @@ export const AutoImageAnnotation: React.FC<Props> = ({
   // 处理拖拽开始
   const handleDragStart = (event: React.MouseEvent, index: number) => {
     event.preventDefault();
+    dragStartTime.current = Date.now();
     const position = positions.get(index);
     if (!position || !containerRef.current || !imageDimensions) return;
 
     const containerRect = containerRef.current.getBoundingClientRect();
     
-    // 记录鼠标相对于图片的初始位置
     dragStartPos.current = {
       x: event.clientX - containerRect.left - imageDimensions.left,
       y: event.clientY - containerRect.top - imageDimensions.top
@@ -425,6 +428,47 @@ export const AutoImageAnnotation: React.FC<Props> = ({
     };
   }, [isDragging]);
 
+  // 清理定时器
+  useEffect(() => {
+    return () => {
+      // 组件卸载时清理所有定时器
+      flipTimersRef.current.forEach(timer => clearTimeout(timer));
+      flipTimersRef.current.clear();
+    };
+  }, []);
+
+  // 处理标签点击
+  const handleLabelClick = (event: React.MouseEvent, index: number) => {
+    event.preventDefault();
+    // 如果正在拖动或者从开始拖动到现在的时间超过200ms，则认为是拖动而不是点击
+    if (isDragging !== null || Date.now() - dragStartTime.current > 200) return;
+    
+    // 清除已存在的定时器
+    const existingTimer = flipTimersRef.current.get(index);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      flipTimersRef.current.delete(index);
+    }
+
+    setFlippedLabels(prev => {
+      const newFlipped = new Set(prev);
+      if (!newFlipped.has(index)) {
+        newFlipped.add(index);
+        // 设置2秒后自动翻转回来的定时器
+        const timer = setTimeout(() => {
+          setFlippedLabels(current => {
+            const updated = new Set(current);
+            updated.delete(index);
+            return updated;
+          });
+          flipTimersRef.current.delete(index);
+        }, 2000);
+        flipTimersRef.current.set(index, timer);
+      }
+      return newFlipped;
+    });
+  };
+
   return (
     <div 
       ref={containerRef}
@@ -457,13 +501,15 @@ export const AutoImageAnnotation: React.FC<Props> = ({
             top: `${imageDimensions.top}px`,
             width: `${imageDimensions.width}px`,
             height: `${imageDimensions.height}px`,
-            pointerEvents: 'none'
+            pointerEvents: 'none',
+            perspective: '1000px' // 添加3D视角
           }}
         >
           {/* 渲染 AWS 检测标签 */}
           {detections.map((detection, index) => {
             const position = positions.get(index);
             if (!position) return null;
+            const isFlipped = flippedLabels.has(index);
             return (
               <div
                 key={`aws-${index}`}
@@ -473,12 +519,16 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                   top: `${position.top}%`,
                   zIndex: isDragging === index ? 30 : 10,
                   cursor: 'move',
-                  pointerEvents: 'auto'
+                  pointerEvents: 'auto',
+                  transformStyle: 'preserve-3d',
+                  transition: 'transform 0.6s',
+                  transform: isFlipped ? 'rotateY(180deg)' : ''
                 }}
                 onMouseDown={(e) => handleDragStart(e, index)}
+                onClick={(e) => handleLabelClick(e, index)}
               >
                 <div 
-                  className="inline-block font-bold text-black px-4 py-2 rounded-md whitespace-nowrap"
+                  className="inline-block font-bold text-black px-4 py-2 rounded-md whitespace-nowrap backface-hidden"
                   style={{ 
                     backgroundColor: 'rgba(255, 255, 0, 0.7)',
                     backdropFilter: 'blur(2px)',
@@ -486,7 +536,25 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                     transform: 'translateY(-50%)',
                     fontSize: '1.4rem',
                     lineHeight: '1.6',
-                    userSelect: 'none'
+                    userSelect: 'none',
+                    backfaceVisibility: 'hidden'
+                  }}
+                >
+                  {detection.keyword}
+                </div>
+                <div 
+                  className="inline-block font-bold text-black px-4 py-2 rounded-md whitespace-nowrap absolute backface-hidden"
+                  style={{ 
+                    backgroundColor: 'rgba(255, 255, 0, 0.7)',
+                    backdropFilter: 'blur(2px)',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                    transform: 'translateY(-50%) rotateY(180deg)',
+                    fontSize: '1.4rem',
+                    lineHeight: '1.6',
+                    userSelect: 'none',
+                    backfaceVisibility: 'hidden',
+                    left: 0,
+                    top: 0
                   }}
                 >
                   {detection.keyword}
@@ -499,6 +567,7 @@ export const AutoImageAnnotation: React.FC<Props> = ({
           {openaiKeywords?.map((keyword, index) => {
             const position = positions.get(detections.length + index);
             if (!position) return null;
+            const isFlipped = flippedLabels.has(detections.length + index);
             return (
               <div
                 key={`openai-${index}`}
@@ -508,12 +577,16 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                   top: `${position.top}%`,
                   zIndex: isDragging === (detections.length + index) ? 30 : 10,
                   cursor: 'move',
-                  pointerEvents: 'auto'
+                  pointerEvents: 'auto',
+                  transformStyle: 'preserve-3d',
+                  transition: 'transform 0.6s',
+                  transform: isFlipped ? 'rotateY(180deg)' : ''
                 }}
                 onMouseDown={(e) => handleDragStart(e, detections.length + index)}
+                onClick={(e) => handleLabelClick(e, detections.length + index)}
               >
                 <div 
-                  className="inline-block font-bold text-black px-4 py-2 rounded-md whitespace-nowrap"
+                  className="inline-block font-bold text-black px-4 py-2 rounded-md whitespace-nowrap backface-hidden"
                   style={{ 
                     backgroundColor: 'rgba(34, 197, 94, 0.7)',
                     backdropFilter: 'blur(2px)',
@@ -521,7 +594,25 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                     transform: 'translateY(-50%)',
                     fontSize: '1.4rem',
                     lineHeight: '1.6',
-                    userSelect: 'none'
+                    userSelect: 'none',
+                    backfaceVisibility: 'hidden'
+                  }}
+                >
+                  {keyword}
+                </div>
+                <div 
+                  className="inline-block font-bold text-black px-4 py-2 rounded-md whitespace-nowrap absolute backface-hidden"
+                  style={{ 
+                    backgroundColor: 'rgba(34, 197, 94, 0.7)',
+                    backdropFilter: 'blur(2px)',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                    transform: 'translateY(-50%) rotateY(180deg)',
+                    fontSize: '1.4rem',
+                    lineHeight: '1.6',
+                    userSelect: 'none',
+                    backfaceVisibility: 'hidden',
+                    left: 0,
+                    top: 0
                   }}
                 >
                   {keyword}
