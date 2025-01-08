@@ -45,6 +45,7 @@ export const AutoImageAnnotation: React.FC<Props> = ({
   const flipTimersRef = useRef<Map<number, NodeJS.Timeout>>(new Map());
   const [translations, setTranslations] = useState<Map<string, string>>(new Map());
   const [isReading, setIsReading] = useState<boolean>(false);
+  const [readingLabel, setReadingLabel] = useState<number | null>(null);
   const clickCountRef = useRef<number>(0);
   const clickTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -436,12 +437,27 @@ export const AutoImageAnnotation: React.FC<Props> = ({
     };
   }, [isDragging]);
 
+  // 添加语音合成功能
+  const speakText = (text: string, index: number) => {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'en-US';
+    utterance.rate = 0.9;
+    utterance.onstart = () => {
+      setIsReading(true);
+      setReadingLabel(index);
+    };
+    utterance.onend = () => {
+      setIsReading(false);
+      setReadingLabel(null);
+    };
+    window.speechSynthesis.speak(utterance);
+  };
+
   // 处理鼠标点击
   const handleMouseClick = (event: React.MouseEvent, index: number, text: string) => {
     event.preventDefault();
     event.stopPropagation();
     
-    // 如果正在拖动，不处理点击
     if (isDragging !== null || Date.now() - dragStartTime.current > 200) return;
 
     clickCountRef.current += 1;
@@ -451,9 +467,7 @@ export const AutoImageAnnotation: React.FC<Props> = ({
     }
 
     clickTimerRef.current = setTimeout(() => {
-      // 根据点击次数执行相应操作
       if (clickCountRef.current === 1) {
-        // 单击：翻转
         const existingTimer = flipTimersRef.current.get(index);
         if (existingTimer) {
           clearTimeout(existingTimer);
@@ -471,29 +485,17 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                 return updated;
               });
               flipTimersRef.current.delete(index);
-            }, 2000);
+            }, 1500);
             flipTimersRef.current.set(index, timer);
           }
           return newFlipped;
         });
       } else if (clickCountRef.current === 2) {
-        // 双击：朗读
-        speakText(text);
+        speakText(text, index);
       }
 
-      // 重置点击计数
       clickCountRef.current = 0;
-    }, 200); // 200ms 内的点击会被认为是同一次点击序列
-  };
-
-  // 添加语音合成功能
-  const speakText = (text: string) => {
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'en-US';
-    utterance.rate = 0.9; // 稍微放慢语速
-    utterance.onstart = () => setIsReading(true);
-    utterance.onend = () => setIsReading(false);
-    window.speechSynthesis.speak(utterance);
+    }, 200);
   };
 
   // 加载翻译
@@ -520,167 +522,181 @@ export const AutoImageAnnotation: React.FC<Props> = ({
     };
   }, []);
 
-  return (
-    <div 
-      ref={containerRef}
-      className={`relative ${className}`} 
-      style={{ 
-        width: '100%', 
-        height: '100%',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center'
-      }}
-    >
-      <img
-        ref={imageRef}
-        src={imageUrl}
-        alt="分析图片"
-        className="w-auto h-auto object-contain"
-        style={{ 
-          maxHeight: '70vh',
-          maxWidth: '100%'
-        }}
-        onLoad={() => console.log('Image loaded')}
-      />
-      
-      {imageDimensions && (
-        <div 
-          className="absolute" 
-          style={{
-            left: `${imageDimensions.left}px`,
-            top: `${imageDimensions.top}px`,
-            width: `${imageDimensions.width}px`,
-            height: `${imageDimensions.height}px`,
-            pointerEvents: 'none',
-            perspective: '1000px' // 添加3D视角
-          }}
-        >
-          {/* 渲染 AWS 检测标签 */}
-          {detections.map((detection, index) => {
-            const position = positions.get(index);
-            if (!position) return null;
-            const isFlipped = flippedLabels.has(index);
-            return (
-              <div
-                key={`aws-${index}`}
-                className="absolute"
-                style={{
-                  left: `${position.left}%`,
-                  top: `${position.top}%`,
-                  zIndex: isDragging === index ? 30 : 10,
-                  cursor: 'move',
-                  pointerEvents: 'auto',
-                  transformStyle: 'preserve-3d',
-                  transition: 'transform 0.6s',
-                  transform: isFlipped ? 'rotateY(180deg)' : '',
-                  transformOrigin: '50% 50%'
-                }}
-                onMouseDown={(e) => handleDragStart(e, index)}
-                onClick={(e) => handleMouseClick(e, index, detection.keyword)}
-              >
-                <div 
-                  className="inline-block font-bold text-black px-4 py-2 rounded-md whitespace-nowrap backface-hidden"
-                  style={{ 
-                    backgroundColor: 'rgba(255, 255, 0, 0.7)',
-                    backdropFilter: 'blur(2px)',
-                    boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-                    transform: 'translateY(-50%)',
-                    fontSize: '1.4rem',
-                    lineHeight: '1.6',
-                    userSelect: 'none',
-                    backfaceVisibility: 'hidden',
-                    position: 'relative'
-                  }}
-                >
-                  {detection.keyword}
-                </div>
-                <div 
-                  className="inline-block font-bold text-black px-4 py-2 rounded-md whitespace-nowrap absolute backface-hidden"
-                  style={{ 
-                    backgroundColor: 'rgba(255, 255, 0, 0.7)',
-                    backdropFilter: 'blur(2px)',
-                    boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-                    transform: 'translateY(-50%) rotateY(180deg)',
-                    fontSize: '1.4rem',
-                    lineHeight: '1.6',
-                    userSelect: 'none',
-                    backfaceVisibility: 'hidden',
-                    position: 'absolute',
-                    left: 0,
-                    top: 0,
-                    width: '100%'
-                  }}
-                >
-                  {translations.get(detection.keyword) || detection.keyword}
-                </div>
-              </div>
-            );
-          })}
+  // 添加关键帧动画样式
+  const shakeAnimation = `
+    @keyframes shake {
+      0%, 100% { transform: translateY(-50%) translateX(0); }
+      25% { transform: translateY(-50%) translateX(-2px) rotate(-1deg); }
+      75% { transform: translateY(-50%) translateX(2px) rotate(1deg); }
+    }
+  `;
 
-          {/* 渲染 OpenAI 关键词标签 */}
-          {openaiKeywords?.map((keyword, index) => {
-            const position = positions.get(detections.length + index);
-            if (!position) return null;
-            const isFlipped = flippedLabels.has(detections.length + index);
-            return (
-              <div
-                key={`openai-${index}`}
-                className="absolute"
-                style={{
-                  left: `${position.left}%`,
-                  top: `${position.top}%`,
-                  zIndex: isDragging === (detections.length + index) ? 30 : 10,
-                  cursor: 'move',
-                  pointerEvents: 'auto',
-                  transformStyle: 'preserve-3d',
-                  transition: 'transform 0.6s',
-                  transform: isFlipped ? 'rotateY(180deg)' : '',
-                  transformOrigin: '50% 50%'
-                }}
-                onMouseDown={(e) => handleDragStart(e, detections.length + index)}
-                onClick={(e) => handleMouseClick(e, detections.length + index, keyword)}
-              >
-                <div 
-                  className="inline-block font-bold text-black px-4 py-2 rounded-md whitespace-nowrap backface-hidden"
-                  style={{ 
-                    backgroundColor: 'rgba(34, 197, 94, 0.7)',
-                    backdropFilter: 'blur(2px)',
-                    boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-                    transform: 'translateY(-50%)',
-                    fontSize: '1.4rem',
-                    lineHeight: '1.6',
-                    userSelect: 'none',
-                    backfaceVisibility: 'hidden',
-                    position: 'relative'
+  return (
+    <>
+      <style>{shakeAnimation}</style>
+      <div 
+        ref={containerRef}
+        className={`relative ${className}`} 
+        style={{ 
+          width: '100%', 
+          height: '100%',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center'
+        }}
+      >
+        <img
+          ref={imageRef}
+          src={imageUrl}
+          alt="分析图片"
+          className="w-auto h-auto object-contain"
+          style={{ 
+            maxHeight: '70vh',
+            maxWidth: '100%'
+          }}
+          onLoad={() => console.log('Image loaded')}
+        />
+        
+        {imageDimensions && (
+          <div 
+            className="absolute" 
+            style={{
+              left: `${imageDimensions.left}px`,
+              top: `${imageDimensions.top}px`,
+              width: `${imageDimensions.width}px`,
+              height: `${imageDimensions.height}px`,
+              pointerEvents: 'none',
+              perspective: '1000px' // 添加3D视角
+            }}
+          >
+            {/* 渲染 AWS 检测标签 */}
+            {detections.map((detection, index) => {
+              const position = positions.get(index);
+              if (!position) return null;
+              const isFlipped = flippedLabels.has(index);
+              return (
+                <div
+                  key={`aws-${index}`}
+                  className="absolute"
+                  style={{
+                    left: `${position.left}%`,
+                    top: `${position.top}%`,
+                    zIndex: isDragging === index ? 30 : 10,
+                    cursor: 'move',
+                    pointerEvents: 'auto',
+                    transformStyle: 'preserve-3d',
+                    transition: 'transform 0.4s',
+                    transform: isFlipped ? 'rotateY(180deg)' : '',
+                    transformOrigin: '50% 50%'
                   }}
+                  onMouseDown={(e) => handleDragStart(e, index)}
+                  onClick={(e) => handleMouseClick(e, index, detection.keyword)}
                 >
-                  {keyword}
+                  <div 
+                    className="inline-block font-bold text-black px-4 py-2 rounded-md whitespace-nowrap backface-hidden"
+                    style={{ 
+                      backgroundColor: 'rgba(255, 255, 0, 0.7)',
+                      backdropFilter: 'blur(2px)',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                      transform: 'translateY(-50%)',
+                      animation: readingLabel === index ? 'shake 0.5s ease-in-out infinite' : 'none',
+                      fontSize: '1.4rem',
+                      lineHeight: '1.6',
+                      userSelect: 'none',
+                      backfaceVisibility: 'hidden',
+                      position: 'relative'
+                    }}
+                  >
+                    {detection.keyword}
+                  </div>
+                  <div 
+                    className="inline-block font-bold text-black px-4 py-2 rounded-md whitespace-nowrap absolute backface-hidden"
+                    style={{ 
+                      backgroundColor: 'rgba(255, 255, 0, 0.7)',
+                      backdropFilter: 'blur(2px)',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                      transform: 'translateY(-50%) rotateY(180deg)',
+                      fontSize: '1.4rem',
+                      lineHeight: '1.6',
+                      userSelect: 'none',
+                      backfaceVisibility: 'hidden',
+                      position: 'absolute',
+                      left: 0,
+                      top: 0,
+                      width: '100%'
+                    }}
+                  >
+                    {translations.get(detection.keyword) || detection.keyword}
+                  </div>
                 </div>
-                <div 
-                  className="inline-block font-bold text-black px-4 py-2 rounded-md whitespace-nowrap absolute backface-hidden"
-                  style={{ 
-                    backgroundColor: 'rgba(34, 197, 94, 0.7)',
-                    backdropFilter: 'blur(2px)',
-                    boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-                    transform: 'translateY(-50%) rotateY(180deg)',
-                    fontSize: '1.4rem',
-                    lineHeight: '1.6',
-                    userSelect: 'none',
-                    backfaceVisibility: 'hidden',
-                    position: 'absolute',
-                    left: 0,
-                    top: 0,
-                    width: '100%'
+              );
+            })}
+
+            {/* 渲染 OpenAI 关键词标签 */}
+            {openaiKeywords?.map((keyword, index) => {
+              const position = positions.get(detections.length + index);
+              if (!position) return null;
+              const isFlipped = flippedLabels.has(detections.length + index);
+              return (
+                <div
+                  key={`openai-${index}`}
+                  className="absolute"
+                  style={{
+                    left: `${position.left}%`,
+                    top: `${position.top}%`,
+                    zIndex: isDragging === (detections.length + index) ? 30 : 10,
+                    cursor: 'move',
+                    pointerEvents: 'auto',
+                    transformStyle: 'preserve-3d',
+                    transition: 'transform 0.4s',
+                    transform: isFlipped ? 'rotateY(180deg)' : '',
+                    transformOrigin: '50% 50%'
                   }}
+                  onMouseDown={(e) => handleDragStart(e, detections.length + index)}
+                  onClick={(e) => handleMouseClick(e, detections.length + index, keyword)}
                 >
-                  {translations.get(keyword) || keyword}
+                  <div 
+                    className="inline-block font-bold text-black px-4 py-2 rounded-md whitespace-nowrap backface-hidden"
+                    style={{ 
+                      backgroundColor: 'rgba(34, 197, 94, 0.7)',
+                      backdropFilter: 'blur(2px)',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                      transform: 'translateY(-50%)',
+                      animation: readingLabel === (detections.length + index) ? 'shake 0.5s ease-in-out infinite' : 'none',
+                      fontSize: '1.4rem',
+                      lineHeight: '1.6',
+                      userSelect: 'none',
+                      backfaceVisibility: 'hidden',
+                      position: 'relative'
+                    }}
+                  >
+                    {keyword}
+                  </div>
+                  <div 
+                    className="inline-block font-bold text-black px-4 py-2 rounded-md whitespace-nowrap absolute backface-hidden"
+                    style={{ 
+                      backgroundColor: 'rgba(34, 197, 94, 0.7)',
+                      backdropFilter: 'blur(2px)',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                      transform: 'translateY(-50%) rotateY(180deg)',
+                      fontSize: '1.4rem',
+                      lineHeight: '1.6',
+                      userSelect: 'none',
+                      backfaceVisibility: 'hidden',
+                      position: 'absolute',
+                      left: 0,
+                      top: 0,
+                      width: '100%'
+                    }}
+                  >
+                    {translations.get(keyword) || keyword}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </>
   );
 }; 
