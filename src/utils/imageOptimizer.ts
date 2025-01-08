@@ -1,7 +1,7 @@
 export const isImageValid = (file: File): boolean => {
   // 检查文件类型
-  const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-  if (!validTypes.includes(file.type)) {
+  const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif'];
+  if (!validTypes.includes(file.type.toLowerCase())) {
     console.error('不支持的文件类型:', file.type);
     return false;
   }
@@ -16,7 +16,40 @@ export const isImageValid = (file: File): boolean => {
   return true;
 };
 
+async function convertHeicToJpeg(file: File): Promise<string> {
+  try {
+    const formData = new FormData();
+    formData.append('image', file);
+
+    const response = await fetch('http://localhost:3000/api/convert-heic', {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || '服务器转换失败');
+    }
+
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch (error: any) {
+    console.error('HEIC转换失败:', error);
+    throw new Error('HEIC转换失败: ' + error.message);
+  }
+}
+
 export const optimizeImage = async (file: File): Promise<string> => {
+  // 如果是 HEIC 格式，先进行转换
+  if (file.type.toLowerCase() === 'image/heic' || file.type.toLowerCase() === 'image/heif') {
+    return await convertHeicToJpeg(file);
+  }
+
   return new Promise((resolve, reject) => {
     console.log('开始优化图片:', {
       name: file.name,

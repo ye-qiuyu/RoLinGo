@@ -73,7 +73,7 @@ export const Process: React.FC = () => {
               <input
                 id="imageUpload"
                 type="file"
-                accept="image/*"
+                accept="image/jpeg,image/png,image/gif,image/webp,image/heic,image/heif"
                 className="hidden"
                 onChange={handleImageUpload}
                 disabled={isLoading}

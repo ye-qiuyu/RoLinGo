@@ -11,9 +11,26 @@ const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const OpenAI = require('openai');
+const multer = require('multer');
+const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 const { RekognitionClient, DetectLabelsCommand } = require('@aws-sdk/client-rekognition');
 
 const app = express();
+
+// 配置 multer
+const upload = multer({ 
+  dest: 'uploads/',
+  limits: {
+    fileSize: 20 * 1024 * 1024 // 20MB
+  }
+});
+
+// 确保上传目录存在
+if (!fs.existsSync('uploads')) {
+  fs.mkdirSync('uploads');
+}
 
 // 配置 CORS
 app.use(cors({
@@ -381,6 +398,94 @@ app.post('/api/translate', async (req, res) => {
         response: error.response?.data
       }
     });
+  }
+});
+
+// HEIC 转换路由
+app.post('/api/convert-heic', upload.single('image'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: '没有收到文件' });
+  }
+
+  try {
+    console.log('收到文件:', {
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+      path: req.file.path
+    });
+
+    const inputPath = req.file.path;
+    const outputPath = path.join('uploads', `${Date.now()}.jpg`);
+
+    // 使用 Python 脚本进行转换
+    const pythonProcess = spawn('python3', [
+      '-c',
+      `
+import os
+import sys
+from PIL import Image
+from pillow_heif import register_heif_opener
+
+try:
+    print('Python: 开始处理文件')
+    print('Python: 输入文件路径:', '${inputPath}')
+    print('Python: 输出文件路径:', '${outputPath}')
+    
+    register_heif_opener()
+    print('Python: HEIF opener 注册成功')
+    
+    image = Image.open('${inputPath}')
+    print('Python: 文件打开成功')
+    
+    image.save('${outputPath}', format="JPEG")
+    print('Python: 文件保存成功')
+    
+    sys.exit(0)
+except Exception as e:
+    print('Python错误:', str(e), file=sys.stderr)
+    sys.exit(1)
+      `
+    ]);
+
+    pythonProcess.stdout.on('data', (data) => {
+      console.log(`Python输出: ${data}`);
+    });
+
+    pythonProcess.stderr.on('data', (data) => {
+      console.error(`Python错误: ${data}`);
+    });
+
+    pythonProcess.on('close', (code) => {
+      if (code === 0) {
+        console.log('Python转换成功，准备读取文件');
+        // 读取转换后的文件并发送
+        const jpegBuffer = fs.readFileSync(outputPath);
+        console.log('文件读取成功，大小:', jpegBuffer.length);
+        res.set('Content-Type', 'image/jpeg');
+        res.send(jpegBuffer);
+        
+        // 清理临时文件
+        fs.unlinkSync(inputPath);
+        fs.unlinkSync(outputPath);
+        console.log('临时文件清理完成');
+      } else {
+        console.error('Python进程退出码:', code);
+        res.status(500).json({ error: 'HEIC转换失败' });
+        // 清理临时文件
+        if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+        if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+      }
+    });
+  } catch (error) {
+    console.error('转换过程出错:', error);
+    console.error('错误堆栈:', error.stack);
+    res.status(500).json({ error: '图片转换失败: ' + error.message });
+    
+    // 确保清理临时文件
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
   }
 });
 

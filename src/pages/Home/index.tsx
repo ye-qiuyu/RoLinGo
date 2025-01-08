@@ -131,7 +131,7 @@ const Home = () => {
         type="file"
         ref={fileInputRef}
         className="hidden"
-        accept="image/*"
+        accept="image/jpeg,image/png,image/gif,image/webp,image/heic,image/heif"
         onChange={handleImageUpload}
       />
 
