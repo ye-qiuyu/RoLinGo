@@ -505,12 +505,23 @@ export const AutoImageAnnotation: React.FC<Props> = ({
       translationService.translateKeywords(analysisResult)
         .then(translations => {
           setTranslations(translations);
+          
+          // 输出所有关键词及其翻译
+          console.log('=== AWS 检测关键词及翻译 ===');
+          detections.forEach((detection, index) => {
+            console.log(`${index + 1}. ${detection.keyword} => ${translations.get(detection.keyword) || '未翻译'}`);
+          });
+          
+          console.log('\n=== OpenAI 关键词及翻译 ===');
+          openaiKeywords?.forEach((keyword, index) => {
+            console.log(`${index + 1}. ${keyword} => ${translations.get(keyword) || '未翻译'}`);
+          });
         })
         .catch(error => {
           console.error('加载翻译失败：', error);
         });
     }
-  }, [analysisResult]);
+  }, [analysisResult, detections, openaiKeywords]);
 
   // 组件卸载时清理定时器
   useEffect(() => {
@@ -604,7 +615,8 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                       lineHeight: '1.6',
                       userSelect: 'none',
                       backfaceVisibility: 'hidden',
-                      position: 'relative'
+                      position: 'relative',
+                      minWidth: '100%'
                     }}
                   >
                     {detection.keyword}
@@ -615,15 +627,16 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                       backgroundColor: 'rgba(255, 255, 0, 0.7)',
                       backdropFilter: 'blur(2px)',
                       boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-                      transform: 'rotateY(180deg)',
                       fontSize: '1.4rem',
                       lineHeight: '1.6',
                       userSelect: 'none',
                       backfaceVisibility: 'hidden',
                       position: 'absolute',
-                      left: 0,
+                      left: '50%',
                       top: 0,
-                      width: '100%'
+                      transformOrigin: 'left center',
+                      transform: 'rotateY(180deg) translateX(-50%)',
+                      whiteSpace: 'nowrap'
                     }}
                   >
                     {translations.get(detection.keyword) || detection.keyword}
@@ -666,7 +679,8 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                       lineHeight: '1.6',
                       userSelect: 'none',
                       backfaceVisibility: 'hidden',
-                      position: 'relative'
+                      position: 'relative',
+                      minWidth: '100%'
                     }}
                   >
                     {keyword}
@@ -677,15 +691,16 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                       backgroundColor: 'rgba(34, 197, 94, 0.7)',
                       backdropFilter: 'blur(2px)',
                       boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-                      transform: 'rotateY(180deg)',
                       fontSize: '1.4rem',
                       lineHeight: '1.6',
                       userSelect: 'none',
                       backfaceVisibility: 'hidden',
                       position: 'absolute',
-                      left: 0,
+                      left: '50%',
                       top: 0,
-                      width: '100%'
+                      transformOrigin: 'left center',
+                      transform: 'rotateY(180deg) translateX(-50%)',
+                      whiteSpace: 'nowrap'
                     }}
                   >
                     {translations.get(keyword) || keyword}
