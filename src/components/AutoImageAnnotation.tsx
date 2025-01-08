@@ -276,16 +276,17 @@ export const AutoImageAnnotation: React.FC<Props> = ({
   const generateRandomPosition = (labelWidth: number, labelHeight: number): { left: number; top: number } | null => {
     if (!imageDimensions) return null;
     
-    const minMarginPixels = 10; // 与图片边缘的最小像素距离
+    const minMarginPixels = 10;
     const marginX = (minMarginPixels / imageDimensions.width) * 100;
     const marginY = (minMarginPixels / imageDimensions.height) * 100;
-    const safetyMargin = 1;
     
-    const maxLeft = 100 - labelWidth - marginX - safetyMargin;
-    const maxTop = 100 - labelHeight - marginY - safetyMargin;
+    const minLeft = marginX;
+    const maxLeft = 100 - labelWidth - marginX;
+    const minTop = marginY + (labelHeight / 4);
+    const maxTop = 100 - (labelHeight / 4) - marginY;
     
-    const left = Math.random() * (maxLeft - marginX - safetyMargin) + marginX + safetyMargin;
-    const top = Math.random() * (maxTop - marginY - safetyMargin) + marginY + safetyMargin;
+    const left = Math.random() * (maxLeft - minLeft) + minLeft;
+    const top = Math.random() * (maxTop - minTop) + minTop;
     
     return { left, top };
   };
@@ -525,9 +526,9 @@ export const AutoImageAnnotation: React.FC<Props> = ({
   // 添加关键帧动画样式
   const shakeAnimation = `
     @keyframes shake {
-      0%, 100% { transform: translateY(-50%) translateX(0); }
-      25% { transform: translateY(-50%) translateX(-2px) rotate(-1deg); }
-      75% { transform: translateY(-50%) translateX(2px) rotate(1deg); }
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-2px) rotate(-1deg); }
+      75% { transform: translateX(2px) rotate(1deg); }
     }
   `;
 
@@ -586,7 +587,7 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                     pointerEvents: 'auto',
                     transformStyle: 'preserve-3d',
                     transition: 'transform 0.4s',
-                    transform: isFlipped ? 'rotateY(180deg)' : '',
+                    transform: isFlipped ? 'rotateY(180deg) translateY(-50%)' : 'translateY(-50%)',
                     transformOrigin: '50% 50%'
                   }}
                   onMouseDown={(e) => handleDragStart(e, index)}
@@ -598,7 +599,6 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                       backgroundColor: 'rgba(255, 255, 0, 0.7)',
                       backdropFilter: 'blur(2px)',
                       boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-                      transform: 'translateY(-50%)',
                       animation: readingLabel === index ? 'shake 0.5s ease-in-out infinite' : 'none',
                       fontSize: '1.4rem',
                       lineHeight: '1.6',
@@ -615,7 +615,7 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                       backgroundColor: 'rgba(255, 255, 0, 0.7)',
                       backdropFilter: 'blur(2px)',
                       boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-                      transform: 'translateY(-50%) rotateY(180deg)',
+                      transform: 'rotateY(180deg)',
                       fontSize: '1.4rem',
                       lineHeight: '1.6',
                       userSelect: 'none',
@@ -649,7 +649,7 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                     pointerEvents: 'auto',
                     transformStyle: 'preserve-3d',
                     transition: 'transform 0.4s',
-                    transform: isFlipped ? 'rotateY(180deg)' : '',
+                    transform: isFlipped ? 'rotateY(180deg) translateY(-50%)' : 'translateY(-50%)',
                     transformOrigin: '50% 50%'
                   }}
                   onMouseDown={(e) => handleDragStart(e, detections.length + index)}
@@ -661,7 +661,6 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                       backgroundColor: 'rgba(34, 197, 94, 0.7)',
                       backdropFilter: 'blur(2px)',
                       boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-                      transform: 'translateY(-50%)',
                       animation: readingLabel === (detections.length + index) ? 'shake 0.5s ease-in-out infinite' : 'none',
                       fontSize: '1.4rem',
                       lineHeight: '1.6',
@@ -678,7 +677,7 @@ export const AutoImageAnnotation: React.FC<Props> = ({
                       backgroundColor: 'rgba(34, 197, 94, 0.7)',
                       backdropFilter: 'blur(2px)',
                       boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-                      transform: 'translateY(-50%) rotateY(180deg)',
+                      transform: 'rotateY(180deg)',
                       fontSize: '1.4rem',
                       lineHeight: '1.6',
                       userSelect: 'none',
