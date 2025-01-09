@@ -19,18 +19,19 @@ const { RekognitionClient, DetectLabelsCommand } = require('@aws-sdk/client-reko
 
 const app = express();
 
+// 确保上传目录存在并设置正确的权限
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true, mode: 0o755 });
+}
+
 // 配置 multer
 const upload = multer({ 
-  dest: 'uploads/',
+  dest: uploadsDir,
   limits: {
     fileSize: 20 * 1024 * 1024 // 20MB
   }
 });
-
-// 确保上传目录存在
-if (!fs.existsSync('uploads')) {
-  fs.mkdirSync('uploads');
-}
 
 // 配置 CORS
 app.use(cors({
@@ -56,7 +57,9 @@ const rekognitionClient = new RekognitionClient({
   credentials: {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || ''
-  }
+  },
+  maxAttempts: 3, // 添加重试
+  retryMode: 'adaptive'
 });
 
 // 添加验证函数
@@ -230,10 +233,73 @@ async function detectObjects(image) {
       是否为Buffer: Buffer.isBuffer(imageBuffer)
     });
 
+    // 如果图片大于 5MB，需要压缩
+    let finalImageBuffer = imageBuffer;
+    if (imageBuffer.length > 5 * 1024 * 1024) {
+      console.log('图片超过 5MB，开始压缩...');
+      
+      // 使用 Python 进行压缩
+      const compressProcess = spawn('python3', [
+        '-c',
+        `
+import sys
+from PIL import Image
+import io
+
+try:
+    # 从标准输入读取图片数据
+    image_data = sys.stdin.buffer.read()
+    
+    # 打开图片
+    image = Image.open(io.BytesIO(image_data))
+    
+    # 计算新的尺寸，保持宽高比
+    max_size = 2048
+    ratio = min(max_size / image.width, max_size / image.height)
+    new_size = (int(image.width * ratio), int(image.height * ratio))
+    
+    # 调整图片大小
+    image = image.resize(new_size, Image.Resampling.LANCZOS)
+    
+    # 保存到内存中
+    output = io.BytesIO()
+    image.save(output, format='JPEG', quality=85)
+    
+    # 写入标准输出
+    sys.stdout.buffer.write(output.getvalue())
+    sys.exit(0)
+except Exception as e:
+    print('压缩错误:', str(e), file=sys.stderr)
+    sys.exit(1)
+        `
+      ]);
+
+      // 写入图片数据
+      compressProcess.stdin.write(imageBuffer);
+      compressProcess.stdin.end();
+
+      // 收集压缩后的数据
+      const chunks = [];
+      compressProcess.stdout.on('data', (chunk) => chunks.push(chunk));
+
+      // 等待压缩完成
+      await new Promise((resolve, reject) => {
+        compressProcess.on('close', (code) => {
+          if (code === 0) {
+            finalImageBuffer = Buffer.concat(chunks);
+            console.log('压缩后的图片大小:', finalImageBuffer.length);
+            resolve();
+          } else {
+            reject(new Error('图片压缩失败'));
+          }
+        });
+      });
+    }
+
     // 准备 AWS Rekognition 请求参数
     const params = {
       Image: {
-        Bytes: imageBuffer
+        Bytes: finalImageBuffer
       },
       MaxLabels: 50,
       MinConfidence: 70
@@ -289,36 +355,60 @@ app.post('/api/vision', async (req, res) => {
     console.log('图片数据长度:', image.length);
 
     // 调用 AWS Rekognition 进行识别
-    const detectionResult = await detectObjects(image);
-    
-    // 提取关键词和置信度
-    const keywords = detectionResult.result?.map(item => item.keyword) || [];
-    const scores = detectionResult.result?.map(item => item.score) || [];
+    try {
+      const detectionResult = await detectObjects(image);
+      
+      // 提取关键词和置信度
+      const keywords = detectionResult.result?.map(item => item.keyword) || [];
+      const scores = detectionResult.result?.map(item => item.score) || [];
 
-    console.log('识别到的关键词:', keywords);
-    console.log('对应的置信度:', scores);
+      console.log('识别到的关键词:', keywords);
+      console.log('对应的置信度:', scores);
 
-    // 使用 OpenAI 优化结果，传入原始图片数据
-    const optimizedResult = await optimizeWithOpenAI(keywords, scores, image);
+      // 使用 OpenAI 优化结果，传入原始图片数据
+      const optimizedResult = await optimizeWithOpenAI(keywords, scores, image);
 
-    // 返回完整结果
-    const result = {
-      aws: detectionResult,
-      detection: detectionResult.result || [],
-      optimized: optimizedResult
-    };
+      // 返回完整结果
+      const result = {
+        aws: detectionResult,
+        detection: detectionResult.result || [],
+        optimized: optimizedResult
+      };
 
-    console.log('最终返回结果:', JSON.stringify(result, null, 2));
-    res.json(result);
-  } catch (error) {
-    console.error('图像处理失败:', error);
-    console.error('错误堆栈:', error.stack);
-    if (error.response) {
-      console.error('错误响应:', error.response.data);
+      console.log('最终返回结果:', JSON.stringify(result, null, 2));
+      res.json(result);
+    } catch (error) {
+      // 检查是否是网络错误
+      if (error.code === 'ENOTFOUND' || error.code === 'ETIMEDOUT') {
+        console.error('AWS 服务连接失败:', error);
+        return res.status(503).json({ 
+          error: 'AWS 服务暂时不可用，请稍后重试',
+          details: error.message
+        });
+      }
+
+      // 检查是否是验证错误
+      if (error.name === 'ValidationException') {
+        console.error('AWS 验证失败:', error);
+        return res.status(400).json({ 
+          error: '图片格式或大小不符合要求',
+          details: error.message
+        });
+      }
+
+      // 其他错误
+      console.error('图像处理失败:', error);
+      console.error('错误堆栈:', error.stack);
+      res.status(500).json({ 
+        error: error.message,
+        details: error.stack
+      });
     }
+  } catch (error) {
+    console.error('请求处理失败:', error);
     res.status(500).json({ 
-      error: error.message,
-      details: error.response?.data || error.stack
+      error: '服务器内部错误',
+      details: error.message
     });
   }
 });
@@ -416,7 +506,7 @@ app.post('/api/convert-heic', upload.single('image'), async (req, res) => {
     });
 
     const inputPath = req.file.path;
-    const outputPath = path.join('uploads', `${Date.now()}.jpg`);
+    const outputPath = path.join(uploadsDir, `${Date.now()}.jpg`);
 
     // 使用 Python 脚本进行转换
     const pythonProcess = spawn('python3', [
@@ -426,20 +516,38 @@ import os
 import sys
 from PIL import Image
 from pillow_heif import register_heif_opener
+import imghdr
 
 try:
     print('Python: 开始处理文件')
     print('Python: 输入文件路径:', '${inputPath}')
     print('Python: 输出文件路径:', '${outputPath}')
     
+    # 检查文件是否存在
+    if not os.path.exists('${inputPath}'):
+        raise Exception(f"输入文件不存在: {inputPath}")
+    
+    # 检查文件大小
+    file_size = os.path.getsize('${inputPath}')
+    print('Python: 输入文件大小:', file_size, '字节')
+    
+    # 注册 HEIF 打开器
     register_heif_opener()
     print('Python: HEIF opener 注册成功')
     
-    image = Image.open('${inputPath}')
-    print('Python: 文件打开成功')
+    # 检测实际的文件类型
+    file_type = imghdr.what('${inputPath}')
+    print('Python: 检测到的文件类型:', file_type)
     
-    image.save('${outputPath}', format="JPEG")
+    # 尝试打开文件
+    image = Image.open('${inputPath}')
+    print('Python: 文件打开成功，格式:', image.format)
+    print('Python: 图片尺寸:', image.size)
+    
+    # 保存为 JPEG
+    image.save('${outputPath}', format="JPEG", quality=95)
     print('Python: 文件保存成功')
+    print('Python: 输出文件大小:', os.path.getsize('${outputPath}'), '字节')
     
     sys.exit(0)
 except Exception as e:
@@ -448,30 +556,52 @@ except Exception as e:
       `
     ]);
 
+    let stdoutData = '';
+    let stderrData = '';
+
     pythonProcess.stdout.on('data', (data) => {
+      stdoutData += data;
       console.log(`Python输出: ${data}`);
     });
 
     pythonProcess.stderr.on('data', (data) => {
+      stderrData += data;
       console.error(`Python错误: ${data}`);
     });
 
     pythonProcess.on('close', (code) => {
       if (code === 0) {
         console.log('Python转换成功，准备读取文件');
-        // 读取转换后的文件并发送
-        const jpegBuffer = fs.readFileSync(outputPath);
-        console.log('文件读取成功，大小:', jpegBuffer.length);
-        res.set('Content-Type', 'image/jpeg');
-        res.send(jpegBuffer);
-        
-        // 清理临时文件
-        fs.unlinkSync(inputPath);
-        fs.unlinkSync(outputPath);
-        console.log('临时文件清理完成');
+        try {
+          // 检查输出文件是否存在
+          if (!fs.existsSync(outputPath)) {
+            throw new Error('输出文件不存在');
+          }
+
+          // 读取转换后的文件并发送
+          const jpegBuffer = fs.readFileSync(outputPath);
+          console.log('文件读取成功，大小:', jpegBuffer.length);
+          res.set('Content-Type', 'image/jpeg');
+          res.send(jpegBuffer);
+          
+          // 清理临时文件
+          fs.unlinkSync(inputPath);
+          fs.unlinkSync(outputPath);
+          console.log('临时文件清理完成');
+        } catch (error) {
+          console.error('文件处理错误:', error);
+          res.status(500).json({ 
+            error: '文件处理失败',
+            details: error.message
+          });
+        }
       } else {
         console.error('Python进程退出码:', code);
-        res.status(500).json({ error: 'HEIC转换失败' });
+        console.error('Python错误输出:', stderrData);
+        res.status(500).json({ 
+          error: 'HEIC转换失败',
+          details: stderrData
+        });
         // 清理临时文件
         if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
         if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
@@ -480,7 +610,10 @@ except Exception as e:
   } catch (error) {
     console.error('转换过程出错:', error);
     console.error('错误堆栈:', error.stack);
-    res.status(500).json({ error: '图片转换失败: ' + error.message });
+    res.status(500).json({ 
+      error: '图片转换失败',
+      details: error.message
+    });
     
     // 确保清理临时文件
     if (req.file && fs.existsSync(req.file.path)) {
