@@ -50,10 +50,17 @@ const ImageProcess = () => {
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedRole, setSelectedRole] = useState<Role>('RealPerson');
+  const [roleDescriptions, setRoleDescriptions] = useState<Record<Role, string>>({
+    Robot: '',
+    RealPerson: '',
+    ProProfessor: '',
+    SmallTalker: '',
+    FunnyBone: ''
+  });
   const isProcessingRef = useRef(false);
   const imageDataRef = useRef(imageData);
   const mountedRef = useRef(false);
-  const [selectedRole, setSelectedRole] = useState<Role>('RealPerson');
 
   // 使用 useEffect 追踪 imageData 的变化
   useEffect(() => {
@@ -78,7 +85,6 @@ const ImageProcess = () => {
 
     // 当图片数据存在时，自动开始分析
     const analyzeCurrentImage = async () => {
-      // 如果正在处理中，直接返回
       if (isProcessingRef.current) {
         console.log('已有分析任务在进行中，跳过此次分析');
         return;
@@ -90,9 +96,14 @@ const ImageProcess = () => {
         setError(null);
         console.log('开始分析图片...');
         const result = await analyzeImage(imageData);
+        
         // 确保分析的是当前图片
         if (imageData === imageDataRef.current) {
           console.log('分析完成:', result);
+          // 保存所有角色的描述
+          if (result.roleDescriptions) {
+            setRoleDescriptions(result.roleDescriptions);
+          }
           setAnalysis(result);
         } else {
           console.log('图片已更改，丢弃旧的分析结果');
@@ -121,46 +132,23 @@ const ImageProcess = () => {
     navigate('/');
   }, [navigate, clearImageData]);
 
-  const handleRoleSelect = async (role: Role) => {
+  const handleRoleSelect = (role: Role) => {
     setSelectedRole(role);
-    if (analysis) {
-      setIsAnalyzing(true);
-      try {
-        // 调用角色切换API
-        const response = await fetch('http://localhost:3000/api/switch-role', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            keywords: analysis.keywords || [],
-            scores: analysis.detection?.map(d => d.score) || [],
-            role: role,
-            imageData: imageData // 添加图片数据
-          }),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || '角色切换失败');
-        }
-
-        const result = await response.json();
+    if (analysis && roleDescriptions[role]) {
+      // 更新分析结果，包括描述和关键词
+      setAnalysis(prev => {
+        if (!prev) return null;
+        // @ts-ignore
+        const roleResult = prev.openaiResults?.[role];
+        if (!roleResult) return prev;
         
-        // 只更新描述部分，保持其他分析结果不变
-        setAnalysis(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            description: result.description
-          };
-        });
-      } catch (error) {
-        console.error('角色切换失败:', error);
-        setError(error instanceof Error ? error.message : '角色切换失败');
-      } finally {
-        setIsAnalyzing(false);
-      }
+        return {
+          ...prev,
+          description: roleResult.description,
+          keywords: roleResult.keywords,
+          scene: roleResult.scene
+        };
+      });
     }
   };
 
