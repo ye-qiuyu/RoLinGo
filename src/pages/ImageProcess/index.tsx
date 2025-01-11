@@ -3,6 +3,8 @@ import { useEffect, useCallback, useState, useRef } from 'react';
 import useImageStore from '../../store/imageStore';
 import { analyzeImage } from '../../services/visionService';
 import { AutoImageAnnotation } from '../../components/AutoImageAnnotation';
+import { Role } from '../../types';
+import styles from './index.module.css';
 
 interface VisionAnalysisResult {
   description: string;
@@ -33,6 +35,14 @@ interface AnalysisResult extends VisionAnalysisResult {
   }[];
 }
 
+const roles: { id: Role; name: string; description: string }[] = [
+  { id: 'Robot', name: '机器人', description: '精确的分析系统' },
+  { id: 'RealPerson', name: '真人', description: '自然的对话风格' },
+  { id: 'ProProfessor', name: '专业教授', description: '专业严谨的表达' },
+  { id: 'SmallTalker', name: '闲聊者', description: '轻松活泼的语气' },
+  { id: 'FunnyBone', name: '幽默者', description: '诙谐有趣的表达' },
+];
+
 const ImageProcess = () => {
   const navigate = useNavigate();
   const imageData = useImageStore((state) => state.imageData);
@@ -43,6 +53,7 @@ const ImageProcess = () => {
   const isProcessingRef = useRef(false);
   const imageDataRef = useRef(imageData);
   const mountedRef = useRef(false);
+  const [selectedRole, setSelectedRole] = useState<Role>('RealPerson');
 
   // 使用 useEffect 追踪 imageData 的变化
   useEffect(() => {
@@ -110,13 +121,77 @@ const ImageProcess = () => {
     navigate('/');
   }, [navigate, clearImageData]);
 
-  const roles = [
-    { id: 'Robot', name: 'Robot' },
-    { id: 'RealPerson', name: 'RealPerson' },
-    { id: 'ProProfessor', name: 'ProProfessor' },
-    { id: 'SmallTalker', name: 'SmallTalker', active: true },
-    { id: 'FunnyBone', name: 'FunnyBone' }
-  ];
+  const handleRoleSelect = async (role: Role) => {
+    setSelectedRole(role);
+    if (analysis) {
+      setIsAnalyzing(true);
+      try {
+        // 调用角色切换API
+        const response = await fetch('http://localhost:3000/api/switch-role', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            keywords: analysis.keywords || [],
+            scores: analysis.detection?.map(d => d.score) || [],
+            role: role,
+            imageData: imageData // 添加图片数据
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || '角色切换失败');
+        }
+
+        const result = await response.json();
+        
+        // 只更新描述部分，保持其他分析结果不变
+        setAnalysis(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            description: result.description
+          };
+        });
+      } catch (error) {
+        console.error('角色切换失败:', error);
+        setError(error instanceof Error ? error.message : '角色切换失败');
+      } finally {
+        setIsAnalyzing(false);
+      }
+    }
+  };
+
+  const handleAnalyzeImage = async (role: Role = selectedRole) => {
+    setIsAnalyzing(true);
+    try {
+      // 调用后端API，传入选中的角色
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          image: imageData,
+          role: role,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('分析失败');
+      }
+
+      const result = await response.json();
+      setAnalysis(result);
+    } catch (error) {
+      console.error('分析出错:', error);
+      // 处理错误...
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
 
   if (!imageData) {
     console.log('No image data in render, returning null');
@@ -124,7 +199,7 @@ const ImageProcess = () => {
   }
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className={styles.container}>
       {/* 顶部导航 */}
       <header className="fixed top-0 left-0 right-0 bg-white border-b border-gray-200 z-10">
         <div className="flex items-center h-14 px-4">
@@ -195,28 +270,37 @@ const ImageProcess = () => {
         )}
 
         {/* 角色选择区域 */}
-        <div className="mt-4 flex justify-between items-center px-4">
+        <div className={styles.roleSelector}>
           {roles.map((role) => (
-            <div
+            <button
               key={role.id}
-              className={`flex flex-col items-center ${
-                role.active ? 'text-orange-500' : 'text-gray-400'
-              }`}
+              className={`${styles.roleButton} ${selectedRole === role.id ? styles.selected : ''}`}
+              onClick={() => handleRoleSelect(role.id)}
+              title={role.description}
             >
-              <div className={`w-12 h-12 rounded-full ${
-                role.active ? 'bg-orange-500' : 'bg-gray-400'
-              }`}></div>
-              <span className="text-xs mt-2">{role.name}</span>
-            </div>
+              <div className={styles.roleCircle} />
+              <div className={styles.roleName}>{role.name}</div>
+            </button>
           ))}
         </div>
 
-        {/* 文本显示区域 */}
-        <div className="mt-4 bg-orange-100 rounded-lg p-4">
-          <p className="text-lg">
-            {analysis?.description || '等待分析结果...'}
-          </p>
-        </div>
+        {/* 错误提示 */}
+        {error && (
+          <div className={styles.error}>
+            {error}
+          </div>
+        )}
+
+        {/* 分析结果显示 */}
+        {isAnalyzing ? (
+          <div className={styles.analyzing}>
+            生成中...
+          </div>
+        ) : analysis ? (
+          <div className={styles.result}>
+            <p className={styles.description}>{analysis.description}</p>
+          </div>
+        ) : null}
 
         {/* 底部操作区域 */}
         <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-200">

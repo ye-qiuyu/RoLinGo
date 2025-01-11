@@ -21,4 +21,16 @@ export interface VisionAnalysisResult {
   };
 }
 
-export interface AnalysisResult extends VisionAnalysisResult {} 
+export interface AnalysisResult extends VisionAnalysisResult {}
+
+export type Role = 'Robot' | 'RealPerson' | 'ProProfessor' | 'SmallTalker' | 'FunnyBone';
+
+export interface RoleConfig {
+  style: string;
+  requirements: string[];
+  example: string;
+}
+
+export interface VisionResponse {
+  role?: Role;
+} 

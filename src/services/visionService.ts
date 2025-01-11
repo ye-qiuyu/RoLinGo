@@ -56,52 +56,59 @@ export const analyzeImage = async (base64Image: string): Promise<VisionAnalysisR
       body: JSON.stringify({ image: base64Image }),
     });
 
+    const result = await response.json();
+
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      // 如果服务器返回了错误信息
+      const errorMessage = result.error || `服务器错误 (${response.status})`;
+      console.error('服务器返回错误:', result);
+      
+      // 如果是 OpenAI 错误但有 AWS 结果，仍然返回部分结果
+      if (result.aws && result.error === 'OpenAI 处理失败') {
+        return {
+          description: '抱歉，描述生成失败，但已识别出以下内容',
+          keywords: result.aws.result?.map((item: any) => item.keyword) || [],
+          scene: '场景分析失败',
+          detection: result.aws.result || []
+        };
+      }
+      
+      throw new Error(errorMessage);
     }
 
-    const result = await response.json();
+    if (!result.optimized && !result.aws) {
+      console.error('服务器返回的数据格式不正确:', result);
+      throw new Error('服务器返回的数据格式不正确');
+    }
     
     // 过滤相似关键词
-    console.log('原始 AWS 结果：', result.aws.result);
-    result.aws.result = filterSimilarKeywords(result.aws.result);
-    console.log('过滤后的 AWS 结果：', result.aws.result);
+    if (result.aws?.result) {
+      result.aws.result = filterSimilarKeywords(result.aws.result);
+      console.log('过滤后的 AWS 结果：', result.aws.result);
+    }
     
     // 确保 detection 结果也使用过滤后的关键词
     if (result.detection) {
       result.detection = filterSimilarKeywords(result.detection);
     }
 
-    // 获取 AWS 关键词列表（转换为小写以进行不区分大小写的比较）
-    const awsKeywords = result.aws.result.map((item: any) => item.keyword.toLowerCase());
+    // 获取 AWS 关键词列表
+    const awsKeywords = result.aws?.result?.map((item: any) => item.keyword.toLowerCase()) || [];
     
-    // 过滤 OpenAI 关键词，移除与 AWS 重复的关键词
-    const openaiFiltered = {
+    // 过滤 OpenAI 关键词
+    const openaiFiltered = result.optimized ? {
       ...result.optimized,
-      keywords: result.optimized.keywords.filter(
+      keywords: (result.optimized.keywords || []).filter(
         (keyword: string) => !awsKeywords.includes(keyword.toLowerCase())
       )
-    };
+    } : null;
     
-    console.log('\n=== AWS Rekognition 识别结果 ===');
-    console.log('识别的关键词及置信度：');
-    result.aws.result.forEach((item: any) => {
-      console.log(`- ${item.keyword} (置信度: ${item.score})`);
-    });
-    
-    console.log('\n=== OpenAI 优化结果（已过滤重复关键词）===');
-    console.log('场景描述：', result.optimized.description);
-    console.log('原始关键词：', result.optimized.keywords.join(', '));
-    console.log('过滤后关键词：', openaiFiltered.keywords.join(', '));
-    console.log('场景类型：', result.optimized.scene);
-    console.log('================\n');
-    
-    // 返回完整结果，包括过滤后的 OpenAI 关键词
+    // 返回完整结果
     return {
-      description: result.optimized.description,
-      keywords: openaiFiltered.keywords,
-      scene: result.optimized.scene,
-      detection: result.detection,
+      description: openaiFiltered?.description || '描述生成失败',
+      keywords: openaiFiltered?.keywords || awsKeywords,
+      scene: openaiFiltered?.scene || '场景分析中...',
+      detection: result.detection || [],
       openaiFiltered
     };
   } catch (error) {

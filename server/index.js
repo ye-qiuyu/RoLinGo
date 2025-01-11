@@ -106,50 +106,122 @@ validateAWSCredentials().catch(error => {
   console.error('AWS 凭证验证失败:', error.message);
 });
 
-// 使用 OpenAI 优化结果
-async function optimizeWithOpenAI(keywords, scores, base64Image) {
+// 添加 tryParseResponse 函数
+async function tryParseResponse(content) {
   try {
-    const prompt = `As a professional image description expert, please analyze this image.
+    // 尝试直接解析
+    return JSON.parse(content);
+  } catch (e) {
+    // 尝试提取 JSON 部分
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        return JSON.parse(jsonMatch[0]);
+      } catch (e2) {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
+// 使用 OpenAI 优化结果
+async function optimizeWithOpenAI(keywords, scores, base64Image, role = 'RealPerson') {
+  try {
+    const roleStyles = {
+      Robot: {
+        style: "As a precise analytical system, use exact measurements, technical terms, and confidence levels. Structure information logically and maintain objective language.",
+        example: "Subject detected (confidence: 95%) in aquatic environment. Primary activity: waste collection. Equipment: mechanical arms, wheels. Location: underwater terrain with marine life present."
+      },
+      RealPerson: {
+        style: "As if casually telling a friend about this scene, use natural language and share personal reactions while maintaining accuracy.",
+        example: "I'm looking at this really interesting scene where..."
+      },
+      ProProfessor: {
+        style: "As an expert analyst, use professional terminology and provide detailed technical insights while maintaining academic rigor.",
+        example: "This image presents a fascinating example of marine robotics technology..."
+      },
+      SmallTalker: {
+        style: "As an engaging conversationalist, create an interactive and light description while highlighting interesting aspects.",
+        example: "You won't believe what I'm seeing - it's absolutely fascinating how..."
+      },
+      FunnyBone: {
+        style: "As a witty observer, use clever wordplay and humorous metaphors while accurately describing the scene.",
+        example: "Talk about taking a 'deep dive' into ocean cleanup..."
+      }
+    };
+
+    const selectedRole = roleStyles[role] || roleStyles.RealPerson;
+
+    // 构建提示词
+    const prompt = base64Image ? `${selectedRole.style}
 
 ${keywords.length > 0 ? `
 Keywords and confidence scores detected by AWS:
 ${keywords.map((kw, i) => `${kw} (${scores[i]})`).join('\n')}
 ` : ''}
 
-Please carefully observe the image content and combine your observations${keywords.length > 0 ? ' with the keywords above' : ''} to return the following information in JSON format:
-1. description: Provide a fluent scene description that:
-   - Starts with the most prominent visual elements
-   - Includes environment, atmosphere, actions, or states
-   - Uses specific and vivid adjectives
-   - Avoids repetitive language and uncertain expressions
-2. keywords: 3-5 most important keywords, ordered by importance, including:
-   - Main objects/subjects
-   - Scene characteristics
-   - Prominent visual elements
-   - Atmosphere or emotional features
-3. scene: A concise and accurate scene type classification
+Please analyze this image and provide a response in the following JSON format:
+{
+  "description": "A detailed scene description in the style specified above",
+  "keywords": ["3-5 key elements"],
+  "scene": "Scene type classification"
+}` :
+      // 如果没有图片（角色切换时），使用更简单的提示词
+      `${selectedRole.style}
 
-Please ensure the description flows naturally, avoiding mechanical listing, and make it more vivid and lively.
-Note: The response must be in valid JSON format, starting with { and ending with }.`;
+Using these keywords and their confidence scores:
+${keywords.map((kw, i) => `${kw} (${scores[i]})`).join('\n')}
 
-    async function tryParseResponse(content) {
-      try {
-        // 尝试提取 JSON 部分
-        const jsonMatch = content.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          return JSON.parse(jsonMatch[0]);
-        }
-        return null;
-      } catch (e) {
-        return null;
+Please rewrite the scene description in your style. Return in this JSON format:
+{
+  "description": "A detailed scene description in your style"
+}`;
+
+    // 构建消息
+    const messages = base64Image ? [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          {
+            type: 'image_url',
+            image_url: {
+              url: base64Image
+            }
+          }
+        ],
       }
+    ] : [
+      {
+        role: 'user',
+        content: prompt
+      }
+    ];
+
+    // 调用 OpenAI API
+    const response = await openaiClient.chat.completions.create({
+      model: 'gpt-4o',
+      messages: messages,
+      max_tokens: base64Image ? 1000 : 500,
+      temperature: 0.7,
+    });
+
+    let content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error('OpenAI 返回内容为空');
     }
 
-    async function retryWithFormat(originalContent) {
+    // 尝试解析返回内容
+    let result = await tryParseResponse(content);
+    
+    // 如果解析失败，尝试修复格式
+    if (!result) {
+      console.log('首次返回格式不正确，尝试修复...');
       const formatPrompt = `
 请将以下内容转换为合法的 JSON 格式，保持原有的创造性描述不变：
 
-${originalContent}
+${content}
 
 请严格按照以下格式返回：
 {
@@ -160,63 +232,23 @@ ${originalContent}
 
       const formatResponse = await openaiClient.chat.completions.create({
         model: 'gpt-4o',
-        messages: [
-          {
-            role: 'user',
-            content: formatPrompt,
-          },
-        ],
+        messages: [{ role: 'user', content: formatPrompt }],
         max_tokens: 500,
         temperature: 0.5,
       });
 
-      return formatResponse.choices[0]?.message?.content;
-    }
-
-    // 第一次尝试，直接使用图片
-    const response = await openaiClient.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: prompt },
-            {
-              type: 'image_url',
-              image_url: {
-                url: base64Image
-              }
-            }
-          ],
-        },
-      ],
-      max_tokens: 1000,
-      temperature: 0.7,
-    });
-
-    let content = response.choices[0]?.message?.content;
-    if (!content) {
-      throw new Error('No content in response');
-    }
-
-    // 尝试解析返回内容
-    let result = await tryParseResponse(content);
-    
-    // 如果解析失败，尝试修复格式
-    if (!result) {
-      console.log('首次返回格式不正确，尝试修复...');
-      const formattedContent = await retryWithFormat(content);
-      result = await tryParseResponse(formattedContent);
+      content = formatResponse.choices[0]?.message?.content;
+      result = await tryParseResponse(content);
       
       if (!result) {
-        throw new Error('Failed to parse response after retry');
+        throw new Error('无法解析 OpenAI 返回的格式');
       }
     }
 
     return result;
   } catch (error) {
     console.error('OpenAI 处理失败:', error);
-    throw error;
+    throw new Error(`OpenAI 处理失败: ${error.message}`);
   }
 }
 
@@ -347,66 +379,47 @@ app.post('/api/vision', async (req, res) => {
   try {
     const { image } = req.body;
     if (!image) {
-      console.error('请求中没有图片数据');
       return res.status(400).json({ error: '请求中没有图片数据' });
     }
 
-    console.log('开始处理图像识别请求...');
-    console.log('图片数据长度:', image.length);
+    let awsResult = null;
+    let openaiResult = null;
 
-    // 调用 AWS Rekognition 进行识别
+    // 先尝试 AWS 识别
     try {
-      const detectionResult = await detectObjects(image);
-      
-      // 提取关键词和置信度
-      const keywords = detectionResult.result?.map(item => item.keyword) || [];
-      const scores = detectionResult.result?.map(item => item.score) || [];
+      awsResult = await detectObjects(image);
+      console.log('AWS 识别成功:', awsResult);
+    } catch (awsError) {
+      console.error('AWS 识别失败:', awsError);
+      // AWS 失败不影响整体流程
+    }
 
-      console.log('识别到的关键词:', keywords);
-      console.log('对应的置信度:', scores);
+    // 提取关键词和置信度
+    const keywords = awsResult?.result?.map(item => item.keyword) || [];
+    const scores = awsResult?.result?.map(item => item.score) || [];
 
-      // 使用 OpenAI 优化结果，传入原始图片数据
-      const optimizedResult = await optimizeWithOpenAI(keywords, scores, image);
-
-      // 返回完整结果
-      const result = {
-        aws: detectionResult,
-        detection: detectionResult.result || [],
-        optimized: optimizedResult
-      };
-
-      console.log('最终返回结果:', JSON.stringify(result, null, 2));
-      res.json(result);
-    } catch (error) {
-      // 检查是否是网络错误
-      if (error.code === 'ENOTFOUND' || error.code === 'ETIMEDOUT') {
-        console.error('AWS 服务连接失败:', error);
-        return res.status(503).json({ 
-          error: 'AWS 服务暂时不可用，请稍后重试',
-          details: error.message
-        });
-      }
-
-      // 检查是否是验证错误
-      if (error.name === 'ValidationException') {
-        console.error('AWS 验证失败:', error);
-        return res.status(400).json({ 
-          error: '图片格式或大小不符合要求',
-          details: error.message
-        });
-      }
-
-      // 其他错误
-      console.error('图像处理失败:', error);
-      console.error('错误堆栈:', error.stack);
-      res.status(500).json({ 
-        error: error.message,
-        details: error.stack
+    // 然后尝试 OpenAI 处理
+    try {
+      openaiResult = await optimizeWithOpenAI(keywords, scores, image);
+      console.log('OpenAI 处理成功:', openaiResult);
+    } catch (openaiError) {
+      console.error('OpenAI 处理失败:', openaiError);
+      return res.status(500).json({
+        error: 'OpenAI 处理失败',
+        details: openaiError.message,
+        aws: awsResult
       });
     }
+
+    // 返回完整结果
+    res.json({
+      aws: awsResult,
+      detection: awsResult?.result || [],
+      optimized: openaiResult
+    });
   } catch (error) {
     console.error('请求处理失败:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: '服务器内部错误',
       details: error.message
     });
@@ -619,6 +632,35 @@ except Exception as e:
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
+  }
+});
+
+// 添加角色切换路由
+app.post('/api/switch-role', async (req, res) => {
+  try {
+    const { keywords, scores, role, imageData } = req.body;
+    
+    if (!role) {
+      return res.status(400).json({ error: '未指定角色' });
+    }
+
+    if (!keywords || !Array.isArray(keywords)) {
+      return res.status(400).json({ error: '关键词数据无效' });
+    }
+
+    // 使用 OpenAI 根据新角色重新生成描述
+    const result = await optimizeWithOpenAI(keywords, scores || [], null, role);
+    
+    res.json({
+      description: result.description || '',
+      role: role
+    });
+  } catch (error) {
+    console.error('角色切换失败:', error);
+    res.status(500).json({ 
+      error: '角色切换失败',
+      details: error.message
+    });
   }
 });
 
