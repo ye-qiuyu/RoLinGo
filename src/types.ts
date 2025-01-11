@@ -9,11 +9,6 @@ export interface Detection {
   score: number;
 }
 
-export interface RoleDescription {
-  description: string;
-  role: Role;
-}
-
 export interface VisionAnalysisResult {
   description: string;
   keywords: string[];
@@ -24,7 +19,6 @@ export interface VisionAnalysisResult {
     keywords: string[];
     scene: string;
   };
-  roleDescriptions?: Record<Role, string>;
 }
 
 export interface AnalysisResult extends VisionAnalysisResult {}

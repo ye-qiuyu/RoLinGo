@@ -164,16 +164,9 @@ ${keywords.map((kw, i) => `${kw} (${scores[i]})`).join('\n')}
 Please analyze this image and provide a response in the following JSON format:
 {
   "description": "A detailed scene description in the style specified above",
-  "keywords": ["3-5 key elements that are most significant in the image, including objects, actions, atmosphere, and visual elements. Be specific and descriptive."],
-  "scene": "A concise scene type classification"
-}
-
-Requirements for keywords:
-1. Focus on significant visual elements and themes
-2. Include both concrete objects and abstract concepts
-3. Be specific and descriptive
-4. Avoid basic or generic terms
-5. Include 3-5 meaningful keywords` :
+  "keywords": ["3-5 key elements"],
+  "scene": "Scene type classification"
+}` :
       // 如果没有图片（角色切换时），使用更简单的提示词
       `${selectedRole.style}
 
@@ -182,9 +175,7 @@ ${keywords.map((kw, i) => `${kw} (${scores[i]})`).join('\n')}
 
 Please rewrite the scene description in your style. Return in this JSON format:
 {
-  "description": "A detailed scene description in your style",
-  "keywords": ${JSON.stringify(keywords)},
-  "scene": "Scene type classification"
+  "description": "A detailed scene description in your style"
 }`;
 
     // 构建消息
@@ -392,8 +383,7 @@ app.post('/api/vision', async (req, res) => {
     }
 
     let awsResult = null;
-    let openaiResults = {};
-    let roleDescriptions = {};
+    let openaiResult = null;
 
     // 先尝试 AWS 识别
     try {
@@ -408,46 +398,10 @@ app.post('/api/vision', async (req, res) => {
     const keywords = awsResult?.result?.map(item => item.keyword) || [];
     const scores = awsResult?.result?.map(item => item.score) || [];
 
-    // 获取所有角色的描述
-    const roles = ['Robot', 'RealPerson', 'ProProfessor', 'SmallTalker', 'FunnyBone'];
-    
+    // 然后尝试 OpenAI 处理
     try {
-      // 并行处理所有角色的描述
-      const rolePromises = roles.map(role => 
-        optimizeWithOpenAI(keywords, scores, image, role)
-          .then(result => [role, result])
-          .catch(error => {
-            console.error(`${role} 角色处理失败:`, error);
-            return [role, {
-              description: `${role} 角色描述生成失败`,
-              keywords: keywords,
-              scene: '场景分析失败'
-            }];
-          })
-      );
-
-      // 等待所有角色的描述都处理完成
-      const results = await Promise.all(rolePromises);
-      
-      // 处理结果
-      results.forEach(([role, result]) => {
-        roleDescriptions[role] = result.description;
-        openaiResults[role] = result;
-      });
-      
-      // 使用 RealPerson 的结果作为默认的 optimized 结果
-      const defaultResult = openaiResults.RealPerson;
-
-      console.log('所有角色描述生成成功');
-      
-      // 返回完整结果
-      res.json({
-        aws: awsResult,
-        detection: awsResult?.result || [],
-        optimized: defaultResult,
-        roleDescriptions: roleDescriptions,
-        openaiResults: openaiResults
-      });
+      openaiResult = await optimizeWithOpenAI(keywords, scores, image);
+      console.log('OpenAI 处理成功:', openaiResult);
     } catch (openaiError) {
       console.error('OpenAI 处理失败:', openaiError);
       return res.status(500).json({
@@ -456,6 +410,13 @@ app.post('/api/vision', async (req, res) => {
         aws: awsResult
       });
     }
+
+    // 返回完整结果
+    res.json({
+      aws: awsResult,
+      detection: awsResult?.result || [],
+      optimized: openaiResult
+    });
   } catch (error) {
     console.error('请求处理失败:', error);
     res.status(500).json({

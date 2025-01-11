@@ -109,14 +109,7 @@ export const analyzeImage = async (base64Image: string): Promise<VisionAnalysisR
       keywords: openaiFiltered?.keywords || awsKeywords,
       scene: openaiFiltered?.scene || '场景分析中...',
       detection: result.detection || [],
-      openaiFiltered,
-      roleDescriptions: result.roleDescriptions || {
-        Robot: '描述生成失败',
-        RealPerson: '描述生成失败',
-        ProProfessor: '描述生成失败',
-        SmallTalker: '描述生成失败',
-        FunnyBone: '描述生成失败'
-      }
+      openaiFiltered
     };
   } catch (error) {
     console.error('图片分析过程出错：', error);

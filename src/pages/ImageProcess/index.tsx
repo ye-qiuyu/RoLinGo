@@ -35,6 +35,11 @@ interface AnalysisResult extends VisionAnalysisResult {
   }[];
 }
 
+interface RoleDescription {
+  description: string;
+  role: Role;
+}
+
 const roles: { id: Role; name: string; description: string }[] = [
   { id: 'Robot', name: '机器人', description: '精确的分析系统' },
   { id: 'RealPerson', name: '真人', description: '自然的对话风格' },
@@ -43,24 +48,63 @@ const roles: { id: Role; name: string; description: string }[] = [
   { id: 'FunnyBone', name: '幽默者', description: '诙谐有趣的表达' },
 ];
 
+const initialRoleDescriptions: Record<Role, string> = {
+  Robot: '',
+  RealPerson: '',
+  ProProfessor: '',
+  SmallTalker: '',
+  FunnyBone: ''
+};
+
 const ImageProcess = () => {
   const navigate = useNavigate();
   const imageData = useImageStore((state) => state.imageData);
   const clearImageData = useImageStore((state) => state.clearImageData);
+  const [roleDescriptions, setRoleDescriptions] = useState<Record<Role, string>>(initialRoleDescriptions);
+  const [selectedRole, setSelectedRole] = useState<Role>('RealPerson');
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedRole, setSelectedRole] = useState<Role>('RealPerson');
-  const [roleDescriptions, setRoleDescriptions] = useState<Record<Role, string>>({
-    Robot: '',
-    RealPerson: '',
-    ProProfessor: '',
-    SmallTalker: '',
-    FunnyBone: ''
-  });
   const isProcessingRef = useRef(false);
   const imageDataRef = useRef(imageData);
   const mountedRef = useRef(false);
+
+  // 加载所有角色的描述
+  const loadAllRoleDescriptions = async (keywords: string[], scores: number[]) => {
+    const descriptions: Record<Role, string> = {} as Record<Role, string>;
+    setIsAnalyzing(true);
+
+    try {
+      // 并行请求所有角色的描述
+      const requests = roles.map(role => 
+        fetch('http://localhost:3000/api/switch-role', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            keywords,
+            scores,
+            role: role.id,
+          }),
+        }).then(res => res.json())
+      );
+
+      const results = await Promise.all(requests);
+      
+      // 存储所有角色的描述
+      roles.forEach((role, index) => {
+        descriptions[role.id] = results[index].description || '';
+      });
+
+      setRoleDescriptions(descriptions);
+    } catch (error) {
+      console.error('加载角色描述失败:', error);
+      setError('加载角色描述失败');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
 
   // 使用 useEffect 追踪 imageData 的变化
   useEffect(() => {
@@ -85,6 +129,7 @@ const ImageProcess = () => {
 
     // 当图片数据存在时，自动开始分析
     const analyzeCurrentImage = async () => {
+      // 如果正在处理中，直接返回
       if (isProcessingRef.current) {
         console.log('已有分析任务在进行中，跳过此次分析');
         return;
@@ -96,15 +141,17 @@ const ImageProcess = () => {
         setError(null);
         console.log('开始分析图片...');
         const result = await analyzeImage(imageData);
-        
         // 确保分析的是当前图片
         if (imageData === imageDataRef.current) {
           console.log('分析完成:', result);
-          // 保存所有角色的描述
-          if (result.roleDescriptions) {
-            setRoleDescriptions(result.roleDescriptions);
-          }
           setAnalysis(result);
+          
+          // 获取所有角色的描述
+          if (result.detection) {
+            const keywords = result.detection.map(d => d.keyword);
+            const scores = result.detection.map(d => d.score);
+            await loadAllRoleDescriptions(keywords, scores);
+          }
         } else {
           console.log('图片已更改，丢弃旧的分析结果');
         }
@@ -134,21 +181,12 @@ const ImageProcess = () => {
 
   const handleRoleSelect = (role: Role) => {
     setSelectedRole(role);
-    if (analysis && roleDescriptions[role]) {
-      // 更新分析结果，包括描述和关键词
-      setAnalysis(prev => {
-        if (!prev) return null;
-        // @ts-ignore
-        const roleResult = prev.openaiResults?.[role];
-        if (!roleResult) return prev;
-        
-        return {
-          ...prev,
-          description: roleResult.description,
-          keywords: roleResult.keywords,
-          scene: roleResult.scene
-        };
-      });
+    // 直接从缓存中获取描述
+    if (roleDescriptions[role]) {
+      setAnalysis(prev => prev ? {
+        ...prev,
+        description: roleDescriptions[role]
+      } : null);
     }
   };
 
@@ -219,26 +257,13 @@ const ImageProcess = () => {
         {/* 图片显示区域 */}
         <div className="bg-gray-100 rounded-lg overflow-hidden mt-4">
           <div className="relative w-full">
-            {isAnalyzing ? (
-              <div className="relative">
-                <img
-                  src={imageData}
-                  alt="uploaded"
-                  className="w-full h-auto object-contain max-h-[70vh]"
-                />
-                <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-                  <div className="text-white">分析中...</div>
-                </div>
-              </div>
-            ) : (
-              <AutoImageAnnotation
-                imageUrl={imageData}
-                detections={analysis?.detection || []}
-                openaiKeywords={analysis?.keywords || []}
-                analysisResult={analysis || undefined}
-                className="max-h-[70vh] object-contain"
-              />
-            )}
+            <AutoImageAnnotation
+              imageUrl={imageData}
+              detections={analysis?.detection || []}
+              openaiKeywords={analysis?.keywords || []}
+              analysisResult={analysis || undefined}
+              className="max-h-[70vh] object-contain"
+            />
           </div>
         </div>
 
