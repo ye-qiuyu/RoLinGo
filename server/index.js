@@ -130,24 +130,24 @@ async function optimizeWithOpenAI(keywords, scores, base64Image, role = 'RealPer
   try {
     const roleStyles = {
       Robot: {
-        style: "As a precise analytical system, use exact measurements, technical terms, and confidence levels. Structure information logically and maintain objective language.",
-        example: "Subject detected (confidence: 95%) in aquatic environment. Primary activity: waste collection. Equipment: mechanical arms, wheels. Location: underwater terrain with marine life present."
+        style: "You are an AI assistant. Share a quick technical observation about something that catches your sensors' attention in this scene.",
+        example: "Ambient lighting analysis: 750 lumens detected from decorative illumination, creating optimal 92% visibility comfort ratio for human occupants."
       },
       RealPerson: {
-        style: "As if casually telling a friend about this scene, use natural language and share personal reactions while maintaining accuracy.",
-        example: "I'm looking at this really interesting scene where..."
+        style: "You're chatting with a friend. Share a quick, natural reaction as if you just walked into this scene.",
+        example: "Oh my gosh, I'm loving the cozy vibes in here! Makes me want to grab a hot chocolate and never leave."
       },
       ProProfessor: {
-        style: "As an expert analyst, use professional terminology and provide detailed technical insights while maintaining academic rigor.",
-        example: "This image presents a fascinating example of marine robotics technology..."
+        style: "You're a cultural anthropology professor who just noticed something interesting. Share a quick academic observation about this scene.",
+        example: "Fascinating how this space exemplifies modern urban cafe culture's reinterpretation of traditional holiday aesthetics."
       },
       SmallTalker: {
-        style: "As an engaging conversationalist, create an interactive and light description while highlighting interesting aspects.",
-        example: "You won't believe what I'm seeing - it's absolutely fascinating how..."
+        style: "You're a friendly person who loves starting conversations. Share your excitement about something you notice in this scene!",
+        example: "Isn't it amazing how they've decorated this place for the holidays? Totally puts you in the festive mood!"
       },
       FunnyBone: {
-        style: "As a witty observer, use clever wordplay and humorous metaphors while accurately describing the scene.",
-        example: "Talk about taking a 'deep dive' into ocean cleanup..."
+        style: "You're a witty person who loves making clever observations. Share a humorous comment about something in this scene.",
+        example: "With all these sparkly decorations, my coffee's feeling a bit underdressed - might need to add some glitter to my latte!"
       }
     };
 
@@ -156,26 +156,28 @@ async function optimizeWithOpenAI(keywords, scores, base64Image, role = 'RealPer
     // 构建提示词
     const prompt = base64Image ? `${selectedRole.style}
 
-${keywords.length > 0 ? `
-Keywords and confidence scores detected by AWS:
-${keywords.map((kw, i) => `${kw} (${scores[i]})`).join('\n')}
-` : ''}
+I'll show you an image. Imagine you're actually there in this scene.
 
-Please analyze this image and provide a response in the following JSON format:
+Important:
+1. Share a quick, natural reaction (1-2 sentences max)
+2. React as if you're really there, speaking in the moment
+3. Focus on whatever interests your character most
+4. Keep it casual and conversational, like real speech
+5. Stay true to your character's personality
+
+Please provide your response in this JSON format:
 {
-  "description": "A detailed scene description in the style specified above",
-  "keywords": ["3-5 key elements"],
-  "scene": "Scene type classification"
+  "description": "Your quick, natural reaction",
+  "keywords": ["3-5 key elements from the scene"],
+  "scene": "A simple label for the setting"
 }` :
       // 如果没有图片（角色切换时），使用更简单的提示词
       `${selectedRole.style}
 
-Using these keywords and their confidence scores:
-${keywords.map((kw, i) => `${kw} (${scores[i]})`).join('\n')}
-
-Please rewrite the scene description in your style. Return in this JSON format:
+Share a quick, natural reaction to this scene.
+Return in this JSON format:
 {
-  "description": "A detailed scene description in your style"
+  "description": "Your quick, natural reaction"
 }`;
 
     // 构建消息
