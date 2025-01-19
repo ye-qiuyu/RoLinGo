@@ -637,7 +637,7 @@ except Exception as e:
   }
 });
 
-// 添加角色切换路由
+// 修改角色切换路由
 app.post('/api/switch-role', async (req, res) => {
   try {
     const { keywords, scores, role, imageData } = req.body;
@@ -650,8 +650,8 @@ app.post('/api/switch-role', async (req, res) => {
       return res.status(400).json({ error: '关键词数据无效' });
     }
 
-    // 使用 OpenAI 根据新角色重新生成描述
-    const result = await optimizeWithOpenAI(keywords, scores || [], null, role);
+    // 使用 OpenAI 根据新角色重新生成描述，传入图片数据
+    const result = await optimizeWithOpenAI(keywords, scores || [], imageData, role);
     
     res.json({
       description: result.description || '',

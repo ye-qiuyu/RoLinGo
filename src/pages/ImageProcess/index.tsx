@@ -86,6 +86,7 @@ const ImageProcess = () => {
             keywords,
             scores,
             role: role.id,
+            imageData  // 添加图片数据
           }),
         }).then(res => res.json())
       );
