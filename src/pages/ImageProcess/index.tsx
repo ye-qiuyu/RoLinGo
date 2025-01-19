@@ -254,7 +254,7 @@ const ImageProcess = () => {
       </header>
 
       {/* 主要内容区域 */}
-      <div className="pt-14 px-4">
+      <div className="px-4">
         {/* 图片显示区域 */}
         <div className="bg-gray-100 rounded-lg overflow-hidden mt-4">
           <div className="relative w-full">
@@ -317,7 +317,7 @@ const ImageProcess = () => {
         ) : null}
 
         {/* 底部操作区域 */}
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-200">
+        <div className="p-4 bg-white border-t border-gray-200">
           <div className="flex items-center justify-between max-w-md mx-auto">
             <button className="p-4">
               <svg className="w-8 h-8" viewBox="0 0 24 24" fill="currentColor">
